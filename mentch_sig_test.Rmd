@@ -1,0 +1,679 @@
+---
+title: "hooker_tests_of_sig"
+author: "Paul Nguyen"
+date: "1/15/2022"
+output: pdf_document
+---
+
+```{r loading libraries, message = FALSE}
+library(tidyverse)
+library(tidymodels)
+library(tree)
+library(ISLR)
+library(randomForest)
+library(rpart)
+library(cowplot)
+#load('data+results/mentch_sig_test2.RData')
+```
+
+
+Notes:
+Building Subsampled Trees
+- n = size of sample
+- m = number of subsamples
+- k = sample size
+Estimating Variance
+- n_z = repeat process n_z times. (n_z sets of fixed points)
+- n_mc = number of subsamples drawn (monte carlo)
+- x_star = point at which we make prediction at
+
+```{r}
+set.seed(2)
+n = 1000
+m = 1000
+k = 75
+n_z = 100
+n_mc = 5000
+
+
+x_1 <- runif(n, min = 0, max = 1)
+x_2 <- runif(n, min = 0, max = 1)
+x_3 <- runif(n, min = 0, max = 1)
+x_4 <- runif(n, min = 0, max = 1)
+x_5 <- runif(n, min = 0, max = 1)
+x_6 <- runif(n, min = 0, max = 1)
+e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+y = 10*sin(pi*x_1*x_2) + 20*(x_3-.05)^2 + (10*x_4) + (5*x_5) + e
+df <- data.frame('y' = y,
+                 'x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5,
+                 'x_6' = x_6)
+
+#making test sets
+x_1 <- seq(0,1, by = (1/40))
+x_2 <- seq(0,1, by = (1/40))
+x_3 <- seq(0,1, by = (1/40))
+x_4 <- seq(0,1, by = (1/40))
+x_5 <- seq(0,1, by = (1/40))
+x_6 <- seq(0,1, by = (1/40))
+
+test_set <- data.frame('x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5,
+                 'x_6' = x_6)
+
+test_set_r <- test_set %>%
+  subset(select = -x_6)
+
+
+x_1 <- seq(.25, .75, by = (.5/40))
+x_2 <- seq(.25, .75, by = (.5/40))
+x_3 <- seq(.25, .75, by = (.5/40))
+x_4 <- seq(.25, .75, by = (.5/40))
+x_5 <- seq(.25, .75, by = (.5/40))
+x_6 <- seq(.25, .75, by = (.5/40))
+
+test_set_centered <- data.frame('x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5,
+                 'x_6' = x_6)
+
+```
+
+
+
+
+
+
+```{r hypothesis test ensemble tree}
+#need to make a function that can make ensemble trees with the same subsamples. one with the full dataset and one with a restricted variable list
+
+
+
+ensemble_tree_hp <- function(df, excluded_var, test_set, m, k, cp = .01){
+    excluded_var <- enquo(excluded_var) #define variable to exclude
+    prediction_full <- rep(NA, dim(test_set)[1]) #set vector for the predictions including all variables at each test point 
+    prediction_r <- rep(NA, dim(test_set)[1]) #set vector for the predictions only restricted variables at each test point
+  
+    predictions <- list(y_hat_full = rep(NA, m), 
+                            y_hat_r = rep(NA, m)) #make list for predictions. two vectors, m (number of subsamples) long
+
+  for (i in 1:m) { #take m subsamples
+    subsample_index <- sample(1:nrow(df), k, replace = FALSE) #select rows from df for subsample
+    subsample <- df[subsample_index,] 
+    subsample_r <- subsample %>%
+      select(-!!excluded_var) #remove excluded variable
+    subsample.tree <- rpart(y ~ . , data = subsample,
+                            control = rpart.control(minsplit = 3,
+                                                    cp = .01))  #make full tree using subsample
+    subsample_r.tree <- rpart(y ~ . , data = subsample_r,
+                            control = rpart.control(minsplit = 3,
+                                                    cp = .01)) #make restricted tree using subsample, without excluded variable
+   
+    for (j in 1:dim(test_set)[1]) {
+      prediction_full[j] <- predict(subsample.tree, newdata = test_set[j,])
+      prediction_r[j] <- predict(subsample_r.tree, newdata = test_set[j,])
+    }
+    #make (number of test points) predictions, store in a vector
+    
+
+    predictions[[1]][i] <- list(prediction_full) #store vector as the first input of prediction_full
+    predictions[[2]][i] <- list(prediction_r) #store vector as the first input of prediction_r
+    print(i)
+  
+  }
+  
+  y_hat_av_full <- vector(length = length(predictions$y_hat_full[[1]])) #make a vector with length of the test set
+  y_hat_av_r <- vector(length = length(predictions$y_hat_full[[1]])) #make a vector with length of the test set
+  empty_vec_full <- vector(length = m) #make a vector with length of how many subsamples we take
+  empty_vec_r <- vector(length = m) #make a vector with length of how many subsamples we take
+  for (j in 1:length(predictions$y_hat_full[[1]])){
+    
+    for (i in 1:m){
+      
+    empty_vec_full[i] <- predictions$y_hat_full[[i]][j] #fill empty vector (length m) with m predictions (full variables) at single test point 
+    empty_vec_r[i] <- predictions$y_hat_r[[i]][j] #fill empty vector (length m) with m predictions (restricted variables) at single test point 
+    }
+    y_hat_av_full[j] <- mean(empty_vec_full) #insert mean prediction of full predictions
+    y_hat_av_r[j] <- mean(empty_vec_r) #insert mean prediction of restricted predictions
+  }
+  
+  dif_vec <- y_hat_av_full - y_hat_av_r #calculating difference vector
+  
+  return(list(y_hat_av_full = y_hat_av_full, y_hat_av_r = y_hat_av_r,
+              dif_vec = dif_vec))
+
+}
+
+
+# x_1_results <- ensemble_tree_hp(df, x_1, test_set, m, k, cp = .01)
+# u_hat <- x_1_results$dif_vec
+# u_hat
+# 
+# 
+# 
+# 
+# 
+# 
+# x_6_results <- ensemble_tree_hp(df, x_6, test_set, m, k, cp = .01)
+
+```
+
+
+Notes:
+Building Subsampled Trees
+- n = size of sample
+- m = number of subsamples
+- k = sample size
+Estimating Variance
+- n_z = repeat process n_z times. (n_z sets of fixed points)
+- n_mc = number of subsamples drawn (monte carlo)
+- x_star = point at which we make prediction at
+
+
+```{r}
+
+
+var_1_finder_hp <- function(df, excluded_var, test_set,
+                            n_z, n_mc, cp = .01){
+  mean_difs <- vector(mode = "list", length = n_z) #create list of lists. n_z lists
+  diff_in_predictions <- vector(mode = "list", length = n_mc) #create list of lists. n_mc lists
+
+  
+
+  excluded_var <- enquo(excluded_var)  
+
+  prediction_full <- rep(NA, dim(test_set)[1]) #empty vector for full predictions
+  prediction_r <- rep(NA, dim(test_set)[1]) #empty vector for restricted predictions
+   
+  
+  for (i in 1:n_z) {
+    index <- sample(1:nrow(df),1)
+    z_tilde <- df[index,] #selecting initial fixed point
+    for (j in 1:n_mc) {
+      vec = 1:nrow(df)
+      vec = vec[-index]
+      subsample_index <- sample(vec, k-1, replace = FALSE) #subsample size k-1, not including index
+      subsample <- df[subsample_index,]
+      subsample[k,] <- z_tilde #manually including z_tilde, now have our subsample
+      subsample.tree <- rpart(y ~ . , data = subsample,
+                              control = rpart.control(minsplit = 3,
+                                                    cp = cp)) #build a tree full using subsample
+      subsample_r <- subsample %>%
+        select(-!!excluded_var) #changed x_6 to !!excluded_var
+      subsample_r.tree <- rpart(y ~ . , data = subsample_r,
+                                control = rpart.control(minsplit = 3,
+                                                        cp = cp)) #build a tree restricted using subsample
+        
+    for (p in 1:dim(test_set)[1]) {
+      prediction_full[p] <- predict(subsample.tree, newdata = test_set[p,]) #predict at test point using full tree
+      prediction_r[p] <- predict(subsample_r.tree, newdata = test_set[p,]) #predict at test point using restricted tree
+    }
+    diff_in_predictions[[j]] <- (prediction_full - prediction_r)
+    print(c(i, j))
+
+    }
+    #calculating mean of predictions. should be n_z means
+    sum_dif <- diff_in_predictions[[1]] #taking mean of predictions differences
+    for (p in 2:length(diff_in_predictions)) {
+      sum_dif <- sum_dif + diff_in_predictions[[p]]
+    }
+    mean_dif <- sum_dif / length(diff_in_predictions)
+    mean_difs[[i]] <- mean_dif 
+  }
+  mean_dif_matrix <- as.matrix(t(data.frame(mean_difs))) #getting matrix in right shape
+  rownames(mean_dif_matrix) <- NULL
+  return(cov(mean_dif_matrix))
+} 
+
+# 
+# sigma_1_6 <- var_1_finder_hp(df, x_6, test_set,
+#                 n_z = 5,
+#                 n_mc = 10, cp = .01)
+# # 
+# sigma_1_1 <- var_1_finder_hp(df, x_6, test_set,
+#                 n_z = 5,
+#                 n_mc = 10, cp = .01)
+
+# 
+# testing <- as.matrix(t(data.frame(testingstuff)))
+# m <- (testing)
+
+
+
+var_k_finder_hp <- function(df, excluded_var, test_set,
+                            n_z, cp = .01){
+  pred_difs <- vector(mode = "list", length = n_z)
+  excluded_var <- enquo(excluded_var)  
+
+  prediction_full <- rep(NA, dim(test_set)[1])
+  prediction_r <- rep(NA, dim(test_set)[1])
+  
+  
+  for (i in 1:n_z) {
+    subsample_index <- sample(1:nrow(df), k, replace = FALSE) 
+    subsample <- df[subsample_index,]
+    
+    subsample.tree <- rpart(y ~ . , data = subsample,
+                              control = rpart.control(minsplit = 3,
+                                                    cp = cp)) #build a tree using subsample
+    subsample_r <- subsample %>%
+      select(-!!excluded_var) #changed x_6 to !!excluded_var
+    subsample_r.tree <- rpart(y ~ . , data = subsample_r,
+                              control = rpart.control(minsplit = 3,
+                                                      cp = cp))
+        
+  for (p in 1:dim(test_set)[1]) {
+    prediction_full[p] <- predict(subsample.tree, newdata = test_set[p,])
+    prediction_r[p] <- predict(subsample_r.tree, newdata = test_set[p,])
+    }
+  pred_difs[[i]] <- (prediction_full - prediction_r)
+  print(i)
+  }
+  
+  pred_dif_matrix <- as.matrix(t(data.frame(pred_difs)))
+  rownames(pred_dif_matrix) <- NULL
+  return(cov(pred_dif_matrix))
+}
+
+
+
+
+
+```
+
+
+Notes:
+Building Subsampled Trees
+- n = size of sample
+- m = number of subsamples
+- k = sample size
+Estimating Variance
+- n_z = repeat process n_z times. (n_z sets of fixed points)
+- n_mc = number of subsamples drawn (monte carlo)
+- x_star = point at which we make prediction at
+
+```{r testing}
+set.seed(2)
+x_1_results <- ensemble_tree_hp(df, x_1, test_set, m, k, cp = .01)
+u_hat_1 <- t(x_1_results$dif_vec)
+
+x_6_results <- ensemble_tree_hp(df, x_6, test_set, m, k, cp = .01)
+u_hat_6 <- t(x_6_results$dif_vec)
+
+
+sigma_1_1 <- var_1_finder_hp(df, x_1, test_set,
+                n_z = 25,
+                n_mc = 200, cp = .01)
+
+sigma_1_6 <- var_1_finder_hp(df, x_6, test_set,
+                n_z = 25,
+                n_mc = 500, cp = .01)
+
+
+
+sigma_k_1 <- var_k_finder_hp(df, x_1, test_set,
+                n_z = 25, cp = .01)
+
+sigma_k_6 <- var_k_finder_hp(df, x_6, test_set,
+                n_z = 25, cp = .01)
+
+k
+alpha_hat = n/m
+
+SIGMA_1 <- ((k^2/alpha_hat)*sigma_1_1) + sigma_k_1
+SIGMA_6 <- ((k^2/alpha_hat)*sigma_1_6) + sigma_k_6
+
+
+result_1 <-  (u_hat_1) %*% solve(SIGMA_1) %*% t(u_hat_1)
+result_6 <-  (u_hat_6) %*% solve(SIGMA_6) %*% t(u_hat_6)
+
+
+
+pchisq(result_1, df = dim(test_set)[1])
+pchisq(result_6, df = dim(test_set)[1])
+qchisq(.05, df = 41)
+#now, cannot solve the sigma6 matrix.. zzz
+#new error: Error in solve.default(SIGMA_6) : 
+  #Lapack routine dgesv: system is exactly singular: U[4,4] = 0
+
+
+#testing another variable
+set.seed(2)
+
+
+x_2_results <- ensemble_tree_hp(df, x_2, test_set, m, k, cp = .01)
+u_hat_2 <- t(x_2_results$dif_vec)
+
+sigma_1_2 <- var_1_finder_hp(df, x_2, test_set,
+                n_z = 25,
+                n_mc = 200, cp = .01)
+
+
+sigma_k_2 <- var_k_finder_hp(df, x_2, test_set,
+                n_z = 25, cp = .01)
+
+k
+alpha_hat = n/m
+
+SIGMA_2 <- ((k^2/alpha_hat)*sigma_1_2) + sigma_k_2
+
+result_2 <-  (u_hat_2) %*% solve(SIGMA_2) %*% t(u_hat_2)
+
+
+
+
+pchisq(result_2, df = dim(test_set)[1])
+
+```
+
+```{r}
+set.seed(2)
+
+
+x_6_results <- ensemble_tree_hp(df, x_6, test_set, m, k, cp = .01)
+u_hat_6 <- t(x_6_results$dif_vec)
+
+sigma_1_6 <- var_1_finder_hp(df, x_6, test_set,
+                n_z = 25,
+                n_mc = 200, cp = .01)
+
+
+sigma_k_6 <- var_k_finder_hp(df, x_6, test_set,
+                n_z = 25, cp = .01)
+
+k
+alpha_hat = n/m
+
+SIGMA_6 <- ((k^2/alpha_hat)*sigma_1_6) + sigma_k_6
+
+result_6 <-  (u_hat_6) %*% solve(SIGMA_6_round) %*% t(u_hat_6)
+
+
+
+
+pchisq(result_6, df = dim(test_set)[1])
+```
+
+```{r}
+set.seed(2)
+
+
+x_6_results <- ensemble_tree_hp(df, x_6, test_set, m, k, cp = .01)
+u_hat_6 <- t(x_6_results$dif_vec)
+
+sigma_1_6 <- var_1_finder_hp(df, x_6, test_set,
+                n_z = 25,
+                n_mc = 200, cp = .01)
+
+
+sigma_k_6 <- var_k_finder_hp(df, x_6, test_set,
+                n_z = 25, cp = .01)
+
+k
+alpha_hat = n/m
+
+SIGMA_6 <- ((k^2/alpha_hat)*sigma_1_6) + sigma_k_6
+
+result_6 <-  (u_hat_6) %*% solve(SIGMA_6_round) %*% t(u_hat_6)
+
+```
+
+
+
+```{r}
+set.seed(2)
+
+
+x_3_results <- ensemble_tree_hp(df, x_3, test_set, m, k, cp = .01)
+u_hat_3 <- t(x_3_results$dif_vec)
+
+sigma_1_3 <- var_1_finder_hp(df, x_3, test_set,
+                n_z = 25,
+                n_mc = 200, cp = .01)
+
+
+sigma_k_3 <- var_k_finder_hp(df, x_3, test_set,
+                n_z = 25, cp = .01)
+
+k
+alpha_hat = n/m
+
+SIGMA_3 <- ((k^2/alpha_hat)*sigma_1_3) + sigma_k_3
+
+result_3 <-  (u_hat_3) %*% solve(SIGMA_3) %*% t(u_hat_3)
+
+
+
+
+pchisq(result_3, df = dim(test_set)[1])
+
+```
+
+
+
+```{r}
+set.seed(2)
+
+
+x_4_results <- ensemble_tree_hp(df, x_4, test_set, m, k, cp = .01)
+u_hat_4 <- t(x_4_results$dif_vec)
+
+sigma_1_4 <- var_1_finder_hp(df, x_4, test_set,
+                n_z = 25,
+                n_mc = 200, cp = .01)
+
+
+sigma_k_4 <- var_k_finder_hp(df, x_4, test_set,
+                n_z = 25, cp = .01)
+
+k
+alpha_hat = n/m
+
+SIGMA_4 <- ((k^2/alpha_hat)*sigma_1_4) + sigma_k_4
+
+result_4 <-  (u_hat_4) %*% solve(SIGMA_4) %*% t(u_hat_4)
+
+
+
+
+pchisq(result_4, df = dim(test_set)[1])
+
+```
+
+
+```{r}
+set.seed(2)
+
+
+x_5_results <- ensemble_tree_hp(df, x_5, test_set, m, k, cp = .01)
+u_hat_5 <- t(x_5_results$dif_vec)
+
+sigma_1_5 <- var_1_finder_hp(df, x_5, test_set,
+                n_z = 25,
+                n_mc = 200, cp = .01)
+
+
+sigma_k_5 <- var_k_finder_hp(df, x_5, test_set,
+                n_z = 25, cp = .01)
+
+k
+alpha_hat = n/m
+
+SIGMA_5 <- ((k^2/alpha_hat)*sigma_1_5) + sigma_k_5
+
+result_5 <-  (u_hat_5) %*% solve(SIGMA_5) %*% t(u_hat_5)
+
+
+
+
+pchisq(result_5, df = dim(test_set)[1])
+
+```
+
+
+```{r small simulation to test results}
+set.seed(4)
+results_df <- data.frame(results_1 = rep(NA, 10),
+                         results_6 = rep(NA, 10))
+
+
+
+for (i in 1:10) {
+  x_1_results <- ensemble_tree_hp(df, x_1, test_set, m, k, cp = .01)
+  u_hat_1 <- t(x_1_results$dif_vec)
+  x_6_results <- ensemble_tree_hp(df, x_6, test_set, m, k, cp = .01)
+  u_hat_6 <- t(x_6_results$dif_vec)
+  
+  result_1 <-  (u_hat_1) %*% solve(SIGMA_1) %*% t(u_hat_1) 
+  result_6 <-  (u_hat_6) %*% solve(SIGMA_6) %*% t(u_hat_6)
+  
+  results_df[i,1] <- result_1
+  results_df[i,2] <- result_6
+  
+}
+save.image(file='data+results/mentch_sig_test2.7.RData')
+
+```
+
+
+
+
+
+
+```{r testing old code since new doesnt work}
+var_1_finder_hp2 <- function(df, excluded_var, test_set,
+                            n_z, n_mc, cp = .01){
+  diff_in_predictions <- vector(mode = "list", length = n_mc) #create list of lists. n_mc lists
+  mean_difs <- vector(mode = "list", length = n_z) #create list of lists. n_z lists
+  
+  excluded_var <- enquo(excluded_var)  
+  prediction_full <- rep(NA, dim(test_set)[1]) #empty vector for full predictions
+  prediction_r <- rep(NA, dim(test_set)[1]) #empty vector for restricted predictions
+   
+  
+  for (i in 1:n_z) {
+    index <- sample(1:nrow(df),1)
+    z_tilde <- df[index,] #selecting initial fixed point
+    for (j in 1:n_mc) {
+      vec = 1:nrow(df)
+      vec = vec[-index]
+      subsample_index <- sample(vec, k-1, replace = FALSE) #subsample size k-1, not including index
+      subsample <- df[subsample_index,]
+      subsample[k,] <- z_tilde #manually including z_tilde, now have our subsample
+      subsample.tree <- rpart(y ~ . , data = subsample,
+                              control = rpart.control(minsplit = 3,
+                                                    cp = cp)) #build a tree full using subsample
+      subsample_r <- subsample %>%
+        select(-!!excluded_var) #changed x_6 to !!excluded_var
+      subsample_r.tree <- rpart(y ~ . , data = subsample_r,
+                                control = rpart.control(minsplit = 3,
+                                                        cp = cp)) #build a tree restricted using subsample
+        
+    for (p in 1:dim(test_set)[1]) {
+      prediction_full[p] <- predict(subsample.tree, newdata = test_set[p,]) #predict at test point using full tree
+      prediction_r[p] <- predict(subsample_r.tree, newdata = test_set[p,]) #predict at test point using restricted tree
+    }
+    diff_in_predictions[[j]] <- (prediction_full - prediction_r)
+    print(c(i, j))
+    }
+    #calculating mean of predictions. should be n_z means
+    sum_dif <- diff_in_predictions[[1]] #taking mean of predictions differences
+    for (p in 2:length(predictions)) {
+      sum_dif <- sum_dif + diff_in_predictions[[p]]
+    }
+    mean_dif <- sum_dif / length(diff_in_predictions)
+    mean_difs[[i]] <- mean_dif 
+  }
+  mean_dif_matrix <- as.matrix(t(data.frame(mean_difs))) #getting matrix in right shape
+  rownames(mean_dif_matrix) <- NULL
+  return(cov(mean_dif_matrix))
+} 
+# 
+# sigma_1_6 <- var_1_finder_hp(df, x_6, test_set,
+#                 n_z = 5,
+#                 n_mc = 10, cp = .01)
+# # 
+# sigma_1_1 <- var_1_finder_hp(df, x_6, test_set,
+#                 n_z = 5,
+#                 n_mc = 10, cp = .01)
+# 
+# testing <- as.matrix(t(data.frame(testingstuff)))
+# m <- (testing)
+var_k_finder_hp2 <- function(df, excluded_var, test_set,
+                            n_z, cp = .01){
+  pred_difs <- vector(mode = "list", length = n_z)
+  excluded_var <- enquo(excluded_var)  
+  prediction_full <- rep(NA, dim(test_set)[1])
+  prediction_r <- rep(NA, dim(test_set)[1])
+  
+  
+  for (i in 1:n_z) {
+    subsample_index <- sample(1:nrow(df), k, replace = FALSE) 
+    subsample <- df[subsample_index,]
+    
+    subsample.tree <- rpart(y ~ . , data = subsample,
+                              control = rpart.control(minsplit = 3,
+                                                    cp = cp)) #build a tree using subsample
+    subsample_r <- subsample %>%
+      select(-!!excluded_var) #changed x_6 to !!excluded_var
+    subsample_r.tree <- rpart(y ~ . , data = subsample_r,
+                              control = rpart.control(minsplit = 3,
+                                                      cp = cp))
+        
+  for (p in 1:dim(test_set)[1]) {
+    prediction_full[p] <- predict(subsample.tree, newdata = test_set[p,])
+    prediction_r[p] <- predict(subsample_r.tree, newdata = test_set[p,])
+    }
+  pred_difs[[i]] <- (prediction_full - prediction_r)
+  print(i)
+  }
+  
+  pred_dif_matrix <- as.matrix(t(data.frame(pred_difs)))
+  rownames(pred_dif_matrix) <- NULL
+  return(cov(pred_dif_matrix))
+}
+
+
+
+set.seed(2)
+
+x_3_results <- ensemble_tree_hp(df, x_3, test_set, m, k, cp = .01)
+u_hat_3 <- t(x_3_results$dif_vec)
+
+
+
+
+sigma_1_3 <- var_1_finder_hp2(df, x_3, test_set,
+                n_z = 5,
+                n_mc = 100, cp = .01) #nz = 50, n_mc = 1000
+
+
+
+
+
+sigma_k_3 <- var_k_finder_hp2(df, x_3, test_set,
+                n_z = 5, cp = .01)
+
+k
+alpha_hat = n/m
+
+
+SIGMA_3 <- ((k^2/alpha_hat)*sigma_1_3) + sigma_k_3
+
+result_3 <-  (u_hat_3) %*% solve(SIGMA_3) %*% t(u_hat_3)
+
+
+```
+
+
+
+
+

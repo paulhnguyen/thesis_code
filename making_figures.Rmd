@@ -1,0 +1,298 @@
+---
+title: "making graphs"
+author: "Paul Nguyen"
+date: "3/27/2022"
+output: pdf_document
+---
+
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(cowplot)
+library(knitr)
+library(kableExtra)
+library(here)
+library(latex2exp)
+
+graph_CI <- function(CI_df){
+  CI_graph <- ggplot(data = CI_df,
+                     mapping = aes(x = X1, xend = X1, y = LB, yend = UB)) +
+      geom_segment() + 
+      geom_hline(yintercept = CI_df$true_mean, color = "tomato") + 
+      xlab("") +
+      ylab("Confidence Interval") + 
+      scale_x_continuous(breaks=c(0,250)) +
+      theme_minimal()
+  return(CI_graph)
+}
+
+setwd('/Users/PaulNguyen/schoolwork_local/Senior Year/thesis/thesis-nguyen')
+#loading previous data
+#prediction data
+simple_pred_small <- read_csv(here("data_and_results", "simple_pred_small.csv"))
+simple_pred_small_0 <- read_csv(here("data_and_results", "simple_pred_small_0.csv"))
+simple_pred_big <- read_csv(here("data_and_results", "simple_pred_big.csv"))
+simple_pred_big_0 <- read_csv(here("data_and_results", "simple_pred_big_0.csv"))
+mars_pred_small <- read_csv(here("data_and_results", "mars_pred_small.csv"))
+mars_pred_small_0 <- read_csv(here("data_and_results", "mars_pred_small_0.csv"))
+
+mars_pred_big <- read_csv(here("data_and_results", "mars_pred_big.csv"))
+mars_pred_big_0 <- read_csv(here("data_and_results", "mars_pred_big_0.csv"))
+
+
+#simple example
+#small n
+simple_small <- read_csv("data_and_results/simple_small.csv")
+#big n
+simple_big <- read_csv("data_and_results/simple_big.csv")
+#setting cp = 0
+simple_small_0 <- read_csv("data_and_results/simple_small_0.csv")
+simple_big_0 <- read_csv("data_and_results/simple_big_0.csv")
+
+#mars example
+#small n
+mars_small <- read_csv("data_and_results/mars_small.csv")
+#big n
+mars_big <- read_csv("data_and_results/mars_big.csv")
+#setting cp = 0
+mars_small_0 <- read_csv("data_and_results/mars_small_0.csv")
+mars_big_0 <- read_csv("data_and_results/mars_big_0.csv")
+
+#significance testing
+
+```
+
+```{r making predictions histograms}
+simple_pred_small_graph <- ggplot(data = simple_pred_small, 
+                                  mapping = aes(x = pred)) +
+  geom_histogram(color = "white",
+                 aes(y = ..density..),
+                 bins = 15) +
+  theme_minimal() +
+  stat_function(fun = dnorm, 
+                args = list(mean = mean(simple_pred_small$pred), 
+                            sd = sqrt(simple_pred_small$var[1]))
+                )
+simple_pred_small_graph
+
+simple_pred_big_graph <- ggplot(data = simple_pred_big, 
+                                  mapping = aes(x = pred)) +
+  geom_histogram(color = "white",
+                 aes(y = ..density..),
+                 bins = 15) +
+  theme_minimal() +
+  stat_function(fun = dnorm, 
+                args = list(mean = mean(simple_pred_big$pred), 
+                            sd = sqrt(simple_pred_big$var[1])),
+                )
+simple_pred_big_graph
+
+#seems like we're overestimating the variance.
+
+
+
+
+simple_pred_small_0_graph <- ggplot(data = simple_pred_small_0, 
+                                  mapping = aes(x = pred)) +
+  geom_histogram(color = "white",
+                 aes(y = ..density..),
+                 bins = 15) +
+  theme_minimal() +
+  stat_function(fun = dnorm, 
+                args = list(mean = mean(simple_pred_small_0$pred), 
+                            sd = sqrt(simple_pred_small_0$var[1]))
+                )
+simple_pred_small_0_graph
+simple_pred_small_graph
+
+
+simple_pred_big_0_graph <- ggplot(data = simple_pred_big_0, 
+                                  mapping = aes(x = pred)) +
+  geom_histogram(color = "white",
+                 aes(y = ..density..),
+                 bins = 15) +
+  theme_minimal() +
+  stat_function(fun = dnorm, 
+                args = list(mean = mean(simple_pred_big_0$pred), 
+                            sd = sqrt(simple_pred_big_0$var[1]))
+                )
+simple_pred_big_0_graph
+simple_pred_big_graph
+
+mars_pred_small_graph <- ggplot(data = mars_pred_small, 
+                                  mapping = aes(x = pred)) +
+  geom_histogram(color = "white",
+                 aes(y = ..density..),
+                 bins = 15) +
+  theme_minimal() +
+  stat_function(fun = dnorm, 
+                args = list(mean = mean(mars_pred_small$pred), 
+                            sd = sqrt(mars_pred_small$var[1])),
+                )
+mars_pred_small_graph
+
+mars_pred_big_graph <- ggplot(data = mars_pred_big, 
+                                  mapping = aes(x = pred)) +
+  geom_histogram(color = "white",
+                 aes(y = ..density..),
+                 bins = 15) +
+  theme_minimal() +
+  stat_function(fun = dnorm, 
+                args = list(mean = mean(mars_pred_big$pred), 
+                            sd = sqrt(mars_pred_big$var[1])),
+                ) #replace with actual means and variances
+mars_pred_big_graph
+
+
+
+
+
+mars_pred_small_0_graph <- ggplot(data = mars_pred_small_0, 
+                                  mapping = aes(x = pred)) +
+  geom_histogram(color = "white",
+                 aes(y = ..density..),
+                 bins = 15) +
+  theme_minimal() +
+  stat_function(fun = dnorm, 
+                args = list(mean = mean(mars_pred_small_0$pred), 
+                            sd = sqrt(mars_pred_small_0$var[1]))
+                )
+mars_pred_small_0_graph
+mars_pred_small_graph
+
+
+mars_pred_big_0_graph <- ggplot(data = mars_pred_big_0, 
+                                  mapping = aes(x = pred)) +
+  geom_histogram(color = "white",
+                 aes(y = ..density..),
+                 bins = 15) +
+  theme_minimal() +
+  stat_function(fun = dnorm, 
+                args = list(mean = mean(mars_pred_big_0$pred), 
+                            sd = sqrt(mars_pred_big_0$var[1]))
+                )
+mars_pred_big_0_graph
+mars_pred_big_graph
+
+
+```
+
+
+
+```{r making a table}
+func <- c(rep("SLR", 4), rep("MARS",4))
+n <- c(200, 200, 1000, 1000, 500, 500, 1000, 1000)
+k <- c(30, 30, 60, 60, 50, 50, 75, 75)
+cp <- c(.01, 0, .01, 0, .01, 0, .01, 0)
+theta <- c(simple_small$true_mean[1],
+           simple_small_0$true_mean[1],
+           simple_big$true_mean[1],
+           simple_big_0$true_mean[1],
+           mars_small$true_mean[1],
+           mars_small_0$true_mean[1],
+           mars_big$true_mean[1],
+           mars_big_0$true_mean[1])
+coverage <- c(sum((simple_small$LB < simple_small$true_mean) & (simple_small$true_mean< simple_small$UB))/250,
+              sum((simple_small_0$LB < simple_small_0$true_mean) & (simple_small_0$true_mean< simple_small_0$UB))/250,
+              sum((simple_big$LB < simple_big$true_mean) & (simple_big$true_mean< simple_big$UB))/250,
+              sum((simple_big_0$LB < simple_big_0$true_mean) & (simple_big_0$true_mean< simple_big_0$UB))/250,
+              
+              sum((mars_small$LB < mars_small$true_mean) & (mars_small$true_mean< mars_small$UB))/250,
+              sum((mars_small_0$LB < mars_small_0$true_mean) & (mars_small_0$true_mean< mars_small_0$UB))/250,
+              sum((mars_big$LB < mars_big$true_mean) & (mars_big$true_mean< mars_big$UB))/250,
+              sum((mars_big_0$LB < mars_big_0$true_mean) & (mars_big_0$true_mean< mars_big_0$UB))/250
+              )
+table_df <- data.frame(underlying_function = func,
+                       n = n,
+                       k = k,
+                       complexity_parameter = cp,
+                       theta = theta,
+                       coverage = coverage)
+
+knitr::kable(table_df, col.names = c("Underlying Function", 
+                                     "$n$",
+                                     "$k$",
+                                     "Complexity Parameter",
+                                     "$\\theta_{k_n}$",
+                                     "Coverage Probability"),
+             booktabs = TRUE,
+             escape = FALSE,
+             align = "lccccr",
+             caption = "Coverage Probabilities for various frameworks")
+
+
+```
+
+```{r confidence interval graphs}
+#limiting distributions for the graphs?
+
+#graphs
+simple_small_graph <- graph_CI(simple_small) +
+  labs(title = "Confidence Intervals for SLR; \nn=200, m=200, k=30") +
+  stat
+simple_small_0_graph <- graph_CI(simple_small_0) +
+  labs(title = "Confidence Intervals for SLR; \ncp = 0, n=200, m=200, k=30")
+
+simple_big_graph <- graph_CI(simple_big) +
+  labs(title = "Confidence Intervals for SLR; \nn=1000, m=1000, k=60")
+simple_big_0_graph <- graph_CI(simple_big_0) +
+  labs(title = "Confidence Intervals for SLR; \ncp = 0, n=1000, m=1000, k=60")
+
+simple_grid <- plot_grid(simple_small_graph, simple_small_0_graph,
+            simple_big_graph, simple_big_0_graph,
+          nrow = 2)
+
+mars_small_graph <- graph_CI(mars_small) +
+  labs(title = "Confidence Intervals for MARS; \nn=500, m=500, k=50")
+mars_small_0_graph <- graph_CI(mars_small_0) +
+  labs(title = "Confidence Intervals for MARS; \ncp = 0, n=500, m=500, k=50")
+
+mars_big_graph <- graph_CI(mars_big) +
+  labs(title = "Confidence Intervals for MARS; \nn=1000, m=1000, k=75")
+mars_big_0_graph <- graph_CI(mars_big_0) +
+  labs(title = "Confidence Intervals for MARS; \ncp = 0, n=1000, m=1000, k=75")
+
+mars_grid <- plot_grid(mars_small_graph, mars_small_0_graph,
+            mars_big_graph, mars_big_0_graph,
+          nrow = 2)
+
+ggsave("data_and_results/simple_small_graph.pdf", simple_small_graph)
+ggsave("data_and_results/simple_small_0_graph.png", simple_small_0_graph)
+ggsave("data_and_results/simple_big_graph.png", simple_big_graph)
+ggsave("data_and_results/simple_big_0_graph.png", simple_big_0_graph)
+ggsave("data_and_results/simple_grid.png", simple_grid)
+
+ggsave("data_and_results/mars_small_graph.png", mars_small_graph)
+ggsave("data_and_results/mars_small_0_graph.png", mars_small_0_graph)
+ggsave("data_and_results/mars_big_graph.png", mars_big_graph)
+ggsave("data_and_results/mars_big_0_graph.png", mars_big_0_graph)
+ggsave("data_and_results/mars_grid.png", mars_grid)
+
+```
+
+
+
+```{r}
+
+many_results_many_var %>%
+  ggplot(mapping = aes(x = teststat_x1)) + 
+  geom_histogram(color = "white", bins = 30) + 
+  geom_vline(xintercept = qchisq(p = .95, df = 1),
+             color = "tomato") +
+  theme_minimal() + 
+  xlab(TeX("Test Statistic Excluding $X_1$")) +
+  labs(title = TeX("Distribution of Test Statistics after excluding $X_1$")) 
+
+many_results_many_var %>%
+  ggplot(mapping = aes(x = teststat_x2)) + 
+  geom_histogram(color = "white", bins = 30) + 
+  geom_vline(xintercept = qchisq(p = .95, df = 1),
+             color = "tomato") +
+  theme_minimal() + 
+  xlab(TeX("Test Statistic Excluding $X_2$")) +
+  labs(title = TeX("Distribution of Test Statistics after excluding $X_2$")) 
+
+```
+
+
+

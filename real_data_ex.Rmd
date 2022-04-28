@@ -1,0 +1,299 @@
+---
+title: "Untitled"
+author: "Paul Nguyen"
+date: "4/24/2022"
+output: pdf_document
+---
+
+```{r}
+library(rpart)
+library(tidyverse)
+library(palmerpenguins)
+library(rpart.plot)
+library(here)
+library(randomForest)
+
+
+ensemble_tree_hp <- function(df, excluded_var, response, test_set, m, k, cp = .01){
+    excluded_var <- enquo(excluded_var) #define variable to exclude
+    y <- enquo(response)
+    prediction_full <- rep(NA, dim(test_set)[1]) #set vector for the predictions including all variables at each test point 
+    prediction_r <- rep(NA, dim(test_set)[1]) #set vector for the predictions only restricted variables at each test point
+  
+    predictions <- list(y_hat_full = rep(NA, m), 
+                            y_hat_r = rep(NA, m)) #make list for predictions. two vectors, m (number of subsamples) long
+
+  for (i in 1:m) { #take m subsamples
+    subsample_index <- sample(1:nrow(df), k, replace = FALSE) #select rows from df for subsample
+    subsample <- df[subsample_index,] 
+    subsample_r <- subsample %>%
+      select(-!!excluded_var) #remove excluded variable
+    subsample.tree <- rpart(y ~ . , data = subsample,
+                            control = rpart.control(minsplit = 3,
+                                                    cp = .01))  #make full tree using subsample
+    subsample_r.tree <- rpart(y ~ . , data = subsample_r,
+                            control = rpart.control(minsplit = 3,
+                                                    cp = .01)) #make restricted tree using subsample, without excluded variable
+   
+    for (j in 1:dim(test_set)[1]) {
+      prediction_full[j] <- predict(subsample.tree, newdata = test_set[j,])
+      prediction_r[j] <- predict(subsample_r.tree, newdata = test_set[j,])
+    }
+    #make (number of test points) predictions, store in a vector
+    
+
+    predictions[[1]][i] <- list(prediction_full) #store vector as the first input of prediction_full
+    predictions[[2]][i] <- list(prediction_r) #store vector as the first input of prediction_r
+    #print(i)
+  
+  }
+  
+  y_hat_av_full <- vector(length = length(predictions$y_hat_full[[1]])) #make a vector with length of the test set
+  y_hat_av_r <- vector(length = length(predictions$y_hat_full[[1]])) #make a vector with length of the test set
+  empty_vec_full <- vector(length = m) #make a vector with length of how many subsamples we take
+  empty_vec_r <- vector(length = m) #make a vector with length of how many subsamples we take
+  for (j in 1:length(predictions$y_hat_full[[1]])){
+    
+    for (i in 1:m){
+      
+    empty_vec_full[i] <- predictions$y_hat_full[[i]][j] #fill empty vector (length m) with m predictions (full variables) at single test point 
+    empty_vec_r[i] <- predictions$y_hat_r[[i]][j] #fill empty vector (length m) with m predictions (restricted variables) at single test point 
+    }
+    y_hat_av_full[j] <- mean(empty_vec_full) #insert mean prediction of full predictions
+    y_hat_av_r[j] <- mean(empty_vec_r) #insert mean prediction of restricted predictions
+  }
+  
+  dif_vec <- y_hat_av_full - y_hat_av_r #calculating difference vector
+  
+  return(list(y_hat_av_full = y_hat_av_full, y_hat_av_r = y_hat_av_r,
+              dif_vec = dif_vec))
+
+}
+
+
+var_1_finder_hp <- function(df, excluded_var, test_set,
+                            n_z, n_mc, k, cp = .01){
+  mean_difs <- vector(mode = "list", length = n_z) #create list of lists. n_z lists
+  diff_in_predictions <- vector(mode = "list", length = n_mc) #create list of lists. n_mc lists
+
+  
+
+  excluded_var <- enquo(excluded_var)  
+
+  prediction_full <- rep(NA, dim(test_set)[1]) #empty vector for full predictions
+  prediction_r <- rep(NA, dim(test_set)[1]) #empty vector for restricted predictions
+   
+  
+  for (i in 1:n_z) {
+    print(c("n_z: ", i))
+    index <- sample(1:nrow(df),1)
+    z_tilde <- df[index,] #selecting initial fixed point
+    for (j in 1:n_mc) {
+      vec = 1:nrow(df)
+      vec = vec[-index]
+      subsample_index <- sample(vec, k-1, replace = FALSE) #subsample size k-1, not including index
+      subsample <- df[subsample_index,]
+      subsample[k,] <- z_tilde #manually including z_tilde, now have our subsample
+      subsample.tree <- rpart(y ~ . , data = subsample,
+                              control = rpart.control(minsplit = 3,
+                                                    cp = cp)) #build a tree full using subsample
+      subsample_r <- subsample %>%
+        select(-!!excluded_var) #changed x_6 to !!excluded_var
+      subsample_r.tree <- rpart(y ~ . , data = subsample_r,
+                                control = rpart.control(minsplit = 3,
+                                                        cp = cp)) #build a tree restricted using subsample
+        
+    for (p in 1:dim(test_set)[1]) {
+      prediction_full[p] <- predict(subsample.tree, newdata = test_set[p,]) #predict at test point using full tree
+      prediction_r[p] <- predict(subsample_r.tree, newdata = test_set[p,]) #predict at test point using restricted tree
+    }
+    diff_in_predictions[[j]] <- (prediction_full - prediction_r)
+    #print(c(i, j))
+
+    }
+    #calculating mean of predictions. should be n_z means
+    sum_dif <- diff_in_predictions[[1]] #taking mean of predictions differences
+    for (p in 2:length(diff_in_predictions)) {
+      sum_dif <- sum_dif + diff_in_predictions[[p]]
+    }
+    mean_dif <- sum_dif / length(diff_in_predictions)
+    mean_difs[[i]] <- mean_dif 
+  }
+  mean_dif_matrix <- as.matrix(t(data.frame(mean_difs))) #getting matrix in right shape
+  rownames(mean_dif_matrix) <- NULL
+  return(cov(mean_dif_matrix))
+} 
+
+
+
+var_k_finder_hp <- function(df, excluded_var, test_set,
+                            n_z, k, cp = .01){
+  pred_difs <- vector(mode = "list", length = n_z)
+  excluded_var <- enquo(excluded_var)  
+
+  prediction_full <- rep(NA, dim(test_set)[1])
+  prediction_r <- rep(NA, dim(test_set)[1])
+  
+  
+  for (i in 1:n_z) {
+    subsample_index <- sample(1:nrow(df), k, replace = FALSE) 
+    subsample <- df[subsample_index,]
+    
+    subsample.tree <- rpart(y ~ . , data = subsample,
+                              control = rpart.control(minsplit = 3,
+                                                    cp = cp)) #build a tree using subsample
+    subsample_r <- subsample %>%
+      select(-!!excluded_var) #changed x_6 to !!excluded_var
+    subsample_r.tree <- rpart(y ~ . , data = subsample_r,
+                              control = rpart.control(minsplit = 3,
+                                                      cp = cp))
+        
+  for (p in 1:dim(test_set)[1]) {
+    prediction_full[p] <- predict(subsample.tree, newdata = test_set[p,])
+    prediction_r[p] <- predict(subsample_r.tree, newdata = test_set[p,])
+    }
+  pred_difs[[i]] <- (prediction_full - prediction_r)
+  #print(i)
+  }
+  
+  pred_dif_matrix <- as.matrix(t(data.frame(pred_difs)))
+  rownames(pred_dif_matrix) <- NULL
+  return(cov(pred_dif_matrix))
+}
+
+
+
+#going to make two functions that get the parameters and another that gets the test stat seperately. that way, won't lose all work if matrix no solvable
+get_parameters <- function(df, excluded_var, response, test_set,
+                           m, n_z, n_mc, k, cp = .01){
+  ex_var <- enquo(excluded_var)  
+  response <- enquo(response)
+  print("getting ensemble results")
+  ensemble_results <- ensemble_tree_hp(df, !!ex_var, response = response,
+                                       test_set, m, k, cp = cp)
+  u_hat <- t(ensemble_results$dif_vec)
+  
+  print("getting sigma_1")
+  sigma_1 <- var_1_finder_hp(df, !!ex_var, test_set,
+                  n_z = n_z,
+                  n_mc = n_mc, k = k,  cp = cp)
+  
+  print("getting sigma_k")
+  sigma_k <- var_k_finder_hp(df, !!ex_var, test_set,
+                  n_z = n_z, k = k, cp = cp)
+  parameters_list <- list(ensemble_results = ensemble_results,
+                           u_hat = u_hat, 
+                           sigma_1 = sigma_1,
+                           sigma_k = sigma_k)
+  return(parameters_list)
+}
+
+
+get_test_stat <- function(n, m, k, parameters_list){
+  alpha_hat = n/m
+  sigma_1 <- parameters_list$sigma_1
+  sigma_k <- parameters_list$sigma_k
+  u_hat <- parameters_list$u_hat
+  
+  SIGMA <- ((1/alpha_hat) * (k^2/m) *sigma_1) + (sigma_k /m)
+  
+  test_stat <-  (u_hat) %*% solve(SIGMA) %*% t(u_hat)
+  p_val <- 1 - pchisq(test_stat, df = dim(test_set)[1])
+  results <- list(ensemble_results =  parameters_list$ensemble_results,
+                  u_hat = parameters_list$u_hat, 
+                  sigma_1 =  parameters_list$sigma_1,
+                  sigma_k =  parameters_list$sigma_k,
+                  SIGMA = SIGMA,
+                  test_stat = test_stat,
+                  p_val = p_val
+                  )
+  return(results)
+}
+  
+```
+
+
+```{r slm}
+set.seed(1)
+penguins <- penguins %>%
+  drop_na()
+test_index <- sample(1:nrow(penguins), 33)
+penguins_train <- penguins[-test_index,]
+penguins_test <- penguins[test_index,]
+
+
+slm <- lm(flipper_length_mm ~ . -year, 
+   data = penguins_train)
+
+summary(slm)
+lm_pred <- predict(slm, penguins_test)
+lm_mse <- mean((penguins_test$flipper_length_mm - lm_pred)^2)
+```
+
+```{r regression tree}
+tree <- rpart(flipper_length_mm ~ . -year, 
+   data = penguins_train)
+rpart.plot(tree)
+tree_pred <- predict(tree, penguins_test)
+tree_mse <- mean((penguins_test$flipper_length_mm - tree_pred)^2)
+```
+
+
+
+```{r rf}
+set.seed(2)
+rf_model <- randomForest(flipper_length_mm ~ . -year, 
+   data = penguins_train)
+rf_pred <- predict(rf_model, penguins_test)
+rf_mse <- mean((penguins_test$flipper_length_mm - rf_pred)^2)
+
+varImpPlot(rf_model)
+```
+
+
+significant improvements from tree -> lm -> random forest
+
+
+testing significance for predictors?
+```{r}
+sum_stats <- summary(penguins_train)
+#make test points the quantiles of distribution? 3 test stats then?
+test_obs_1 <- data.frame(species = "Adelie",
+                     island = "Biscoe",
+                     bill_length_mm = 38.80,
+                     bill_depth_mm = 16.00,
+                     body_mass_g = 3425,
+                     sex = "male")
+test_obs_2 <- data.frame(species = "Adelie",
+                     island = "Biscoe",
+                     bill_length_mm = 44.10,
+                     bill_depth_mm = 17.50,
+                     body_mass_g = 3800,
+                     sex = "male")
+test_obs_3 <- data.frame(species = "Adelie",
+                     island = "Biscoe",
+                     bill_length_mm = 49.10,
+                     bill_depth_mm = 18.80,
+                     body_mass_g = 4400,
+                     sex = "male")
+
+test_set <- rbind(test_obs_1, test_obs_2) %>%
+  rbind(test_obs_3)
+
+
+#stuck here
+ensemble_tree_hp(df = penguins_train,
+                                excluded_var = "species",
+                                test_set = test_set,
+                                response = "flipper_length_mm",
+                 m = 500)
+
+species_param <- get_parameters(df = penguins_train,
+                                excluded_var = "species",
+                                test_set = test_set,
+                                response = "flipper_length_mm",
+                                m = 500, n_z = 25, n_mc = 10, k = 30, cp = .01)
+
+```
+
+

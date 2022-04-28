@@ -1,0 +1,204 @@
+---
+title: "testing while other code is running"
+author: "Paul Nguyen"
+date: "12/5/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+
+library(tidymodels)
+library(tree)
+library(ISLR)
+library(randomForest)
+library(rpart)
+```
+
+
+
+```{r loading essentials}
+ensemble_tree2 <- function(df, m, k, x_star){
+  
+  predictions <- data.frame(y_hat = rep(NA, m))
+
+  for (i in 1:m) {
+    subsample_index <- sample(1:nrow(df), k, replace = FALSE) 
+    subsample <- df[subsample_index,]
+    subsample.tree <- rpart(y ~ . , data = subsample,
+                            control = rpart.control(minsplit = 3)) #possibly set cp to be low
+    #took out cp = 0  in ensemble tree2, var finder 1 and k, will check. want variance to be smaller to make smaller CI
+    prediction <- predict(subsample.tree, newdata = x_star)
+    predictions[i,1] <- prediction
+  
+  }
+  
+  y_hat_av <- mean(predictions$y_hat)
+  list1 <- list(predictions = predictions, y_hat_av = y_hat_av)
+  return(list1)
+
+}
+
+testing <- ensemble_tree2(df, m, k = 200, x_star)
+
+
+
+
+
+var_1_finder <- function(df, n_z, n_mc, x_star){
+  predictions <- rep(NA, n_mc)
+  pred_means <- rep(NA, n_z)
+  for (i in 1:n_z) {
+    index <- sample(1:nrow(df),1)
+    z_tilde <- df[index,] #selecting initial fixed point
+    for (j in 1:n_mc) {
+      vec = 1:nrow(df)
+      vec = vec[-index]
+      subsample_index <- sample(vec, k-1, replace = FALSE) #subsample size k-1, not including index
+      subsample <- df[subsample_index,]
+      subsample[k,] <- z_tilde #manually including z_tilde, now have our subsample
+      subsample.tree <- rpart(y ~ . , data = subsample,
+                              control = rpart.control(minsplit = 3)) #build a tree using subsample
+      prediction <- predict(subsample.tree, newdata = x_star) #predict at x_star using subsample tree
+      predictions[j] <- prediction
+    }
+    pred_means[i] <- mean(predictions)
+  }
+  
+  
+  #now, take variance of pred_means
+  zeta_1_kn <- var(pred_means)
+  return(zeta_1_kn)
+  
+}
+
+var_k_finder <- function(df, n_z, x_star){
+  predictions <- rep(NA, n_z)
+  for (i in 1:n_z) {
+    subsample_index <- sample(1:nrow(df), k, replace = FALSE) 
+    subsample <- df[subsample_index,]
+    subsample.tree <- rpart(y ~ . , data = subsample,
+                              control = rpart.control(minsplit = 3)) #build a tree using subsample
+    prediction <- predict(subsample.tree, newdata = x_star) #predict at x_star using subsample tree
+    predictions[i] <- prediction
+  }
+  
+  
+  #now, take variance of n_z predictions
+  zeta_k_n_kn <- var(predictions)
+  return(zeta_k_n_kn)
+}
+
+```
+
+
+```{r making CI plots?}
+load('mentch_recreation.RData')
+library(cowplot)
+
+
+#assume  we have true mean
+
+x <- 1:250
+gg_df <- data.frame(big_CI_df1, x)
+
+simpleCIplot_1 <- ggplot(data = gg_df,
+                       mapping = aes(x = x, xend = x, y = LB, yend = UB)) +
+  geom_segment() + 
+  geom_hline(yintercept = 20, color = "tomato") + 
+  labs(xlab = "", ylab = "Confidence Interval",
+       title = "Confidence Intervals for SLR, \n n=200, m=200, k=30") +
+  ylim(16,24)
+simpleCIplot_1
+
+gg_df <- data.frame(big_CI_df2, x)
+
+simpleCIplot_2 <- ggplot(data = gg_df, mapping = aes(x = x, xend = x, y = LB, yend = UB)) +
+  geom_segment() + 
+  geom_hline(yintercept = 20, color = "tomato") + 
+  labs(xlab = "", ylab = "Confidence Interval",
+       title = "Confidence Intervals for SLR, \n n=500, m=500, k=50")+
+  ylim(16,24)
+simpleCIplot_2
+
+plot_grid(simpleCIplot_1, simpleCIplot_2)
+
+
+```
+
+
+
+
+
+```{r hypothesis testing MARS}
+n = 1000
+m = 1000
+k = 75
+n_z = 100 #estimate covariance only once since interested in distribution of test statistics
+n_mc = 5000
+reps = 250
+
+set.seed(4)
+x_1 <- runif(n, min = 0, max = 1)
+x_2 <- runif(n, min = 0, max = 1)
+x_3 <- runif(n, min = 0, max = 1)
+x_4 <- runif(n, min = 0, max = 1)
+x_5 <- runif(n, min = 0, max = 1)
+x_6 <- runif(n, min = 0, max = 1)
+e <- rnorm(n, mean = 0, sd = sqrt(10))
+y = 10*sin(pi*x_1*x_2) + 20*(x_3-.05)^2 + (10*x_4) + (5*x_5) + e
+
+df <- data.frame('y' = y,
+                 'x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5,
+                 'x_6' = x_6)
+
+
+#making test set
+x_1 <- seq(0,1, by = (1/40))
+x_2 <- seq(0,1, by = (1/40))
+x_3 <- seq(0,1, by = (1/40))
+x_4 <- seq(0,1, by = (1/40))
+x_5 <- seq(0,1, by = (1/40))
+x_6 <- seq(0,1, by = (1/40))
+
+test_set <- data.frame('x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5,
+                 'x_6' = x_6)
+
+
+x_1 <- seq(.25, .75, by = (.5/40))
+x_2 <- seq(.25, .75, by = (.5/40))
+x_3 <- seq(.25, .75, by = (.5/40))
+x_4 <- seq(.25, .75, by = (.5/40))
+x_5 <- seq(.25, .75, by = (.5/40))
+x_6 <- seq(.25, .75, by = (.5/40))
+
+test_set_centered <- data.frame('x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5,
+                 'x_6' = x_6)
+
+
+
+
+```
+
+
+```{r}
+library(rlist)
+test_list <- list.load('data_and_results/results_simple_2_n_z_small.rdata')
+
+```
+
+
+
+

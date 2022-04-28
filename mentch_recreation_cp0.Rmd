@@ -1,0 +1,634 @@
+---
+title: "mentch_recreate_cp0"
+author: "Paul Nguyen"
+date: "11/29/2021"
+output: pdf_document
+---
+
+```{r loading libraries, message = FALSE}
+library(tidyverse)
+
+library(tidymodels)
+library(tree)
+library(ISLR)
+library(randomForest)
+library(rpart)
+
+#loading environment
+#load('mentch_recreation.RData')
+```
+
+<!-- ```{r simulating data} -->
+<!-- set.seed(2) -->
+<!-- #formula for data -->
+<!-- #g(x) = 10 sin(pi x1x2) + 20(x3 - 0.05)2 + 10x4 + 5x5; X = [0, 1]5 -->
+<!-- n = 1000 #number of training -->
+<!-- m = 1000 #number of subsamples / random trees -->
+<!-- k = 75 #size of subsample -->
+<!-- x_1 <- runif(n, min = 0, max = 1) -->
+<!-- x_2 <- runif(n, min = 0, max = 1) -->
+<!-- x_3 <- runif(n, min = 0, max = 1) -->
+<!-- x_4 <- runif(n, min = 0, max = 1) -->
+<!-- x_5 <- runif(n, min = 0, max = 1) -->
+<!-- e <- rnorm(n, mean = 0, sd = sqrt(10)) -->
+<!-- y = 10*sin(pi*x_1*x_2) + 20*(x_3-.05)^2 + (10*x_4) + (5*x_5) + e -->
+
+<!-- df <- data.frame('y' = y, -->
+<!--                  'x_1' = x_1, -->
+<!--                  'x_2' = x_2, -->
+<!--                  'x_3' = x_3, -->
+<!--                  'x_4' = x_4, -->
+<!--                  'x_5' = x_5)  -->
+<!-- colnames(df) = c('y', 'x_1', 'x_2', 'x_3', 'x_4', 'x_5') -->
+
+<!-- x_star <- data.frame(x_1 = .5, x_2 = .5, x_3 = .5, -->
+<!--                      x_4 = .5, x_5 = .5) #prediction at this point -->
+
+<!-- ``` -->
+
+<!-- ```{r making function to make subbagged ensembles} -->
+<!-- set.seed(2) -->
+
+<!-- ensemble_tree <- function(df, m, k, x_star){ -->
+
+<!--   predictions <- data.frame(y_hat = rep(NA, m)) -->
+
+<!--   for (i in 1:m) { -->
+<!--     subsample_index <- sample(1:nrow(df), k, replace = FALSE) #yes replacement, index of subsample in training set... changed this to be true after looking at graph -->
+
+<!--     #is it supposed to be taken with replacement? see pg 18. they note that the bootstrap case they take with replacement, so the other ones do they? -->
+
+<!--     #ok, starting to think that its no replacement. see pg 5. talk about n choose k possible subsamples, and this kind of implies that there wouldnt be replacement, other wise there would be way more than n choose k possible subsmaples n^k instead. -->
+<!--     subsample <- df[subsample_index,] -->
+<!--     subsample.tree <- rpart(y ~ . , data = subsample, -->
+<!--                             control = rpart.control(minsplit = 3, cp = 0)) #possibly set cp to be low -->
+<!--     prediction <- predict(subsample.tree, newdata = x_star) -->
+<!--     predictions[i,1] <- prediction -->
+
+<!--   } -->
+
+<!--   y_hat_av <- mean(predictions$y_hat) -->
+<!--   return(y_hat_av) -->
+
+<!-- } -->
+
+
+<!-- #recreation of figure 2, pg 17... this is just the ggplots of the actual predictions for every single tree... not the ggplots of the 250 means.. silly mistake. need to do simulation of the above 250 times. -->
+
+
+<!-- results1 <- ensemble_tree(df, m, k = 200, x_star) -->
+
+<!-- y_hat_df_1 <- data.frame(y_hat_av = rep(NA, 250)) -->
+
+
+<!-- #mini example before i sleep.. paper uses 250 -->
+<!-- for (i in 1:250) { -->
+<!--   y_hat_df_1[i,1] <- ensemble_tree(df, m, k = 200, x_star) -->
+<!--   print(i) -->
+<!-- } -->
+<!-- k = 200 -->
+<!-- ggplot(y_hat_df_1, aes(x = y_hat_av)) +  -->
+<!--   geom_histogram(aes(y = ..density..), -->
+<!--                  colour = 1, fill = "white") + -->
+<!--   geom_density() + -->
+<!--   labs(title = paste("n = ", n, ", m = ", m, ", k = ", k, sep = "" )) -->
+
+
+
+
+<!-- results2 <- ensemble_tree(df, m, k = 1000, x_star) -->
+
+<!-- y_hat_df_2 <- data.frame(y_hat_av = rep(NA, 250)) -->
+
+<!-- #mini example before i sleep.. paper uses 250 -->
+<!-- for (i in 1:250) { -->
+<!--   y_hat_df_2[i,1] <- ensemble_tree(df, m, k = 1000, x_star) -->
+<!--   #print(i) -->
+<!-- } -->
+
+<!-- k = 1000 -->
+<!-- ggplot(y_hat_df_2, aes(x = y_hat_av)) +  -->
+<!--   geom_histogram(aes(y = ..density..), -->
+<!--                  colour = 1, fill = "white") + -->
+<!--   geom_density() + -->
+<!--   labs(title = paste("n = ", n, ", m = ", m, ", k = ", k, sep = "" )) -->
+
+<!-- #save.image(file='mentch_recreation.RData') -->
+
+<!-- ``` -->
+
+```{r making a new command that returns more, variance also?}
+ensemble_tree2 <- function(df, m, k, x_star){
+  
+  predictions <- data.frame(y_hat = rep(NA, m))
+
+  for (i in 1:m) {
+    subsample_index <- sample(1:nrow(df), k, replace = FALSE) 
+    subsample <- df[subsample_index,]
+    subsample.tree <- rpart(y ~ . , data = subsample,
+                            control = rpart.control(minsplit = 3)) #possibly set cp to be low
+    #took out cp = 0  in ensemble tree2, var finder 1 and k, will check. want variance to be smaller to make smaller CI
+    prediction <- predict(subsample.tree, newdata = x_star)
+    predictions[i,1] <- prediction
+  
+  }
+  
+  y_hat_av <- mean(predictions$y_hat)
+  list1 <- list(predictions = predictions, y_hat_av = y_hat_av)
+  return(list1)
+
+}
+
+#testing <- ensemble_tree2(df, m, k = 200, x_star)
+
+
+
+
+
+var_1_finder <- function(df, n_z, n_mc, x_star){
+  predictions <- rep(NA, n_mc)
+  pred_means <- rep(NA, n_z)
+  for (i in 1:n_z) {
+    index <- sample(1:nrow(df),1)
+    z_tilde <- df[index,] #selecting initial fixed point
+    for (j in 1:n_mc) {
+      vec = 1:nrow(df)
+      vec = vec[-index]
+      subsample_index <- sample(vec, k-1, replace = FALSE) #subsample size k-1, not including index
+      subsample <- df[subsample_index,]
+      subsample[k,] <- z_tilde #manually including z_tilde, now have our subsample
+      subsample.tree <- rpart(y ~ . , data = subsample,
+                              control = rpart.control(minsplit = 3)) #build a tree using subsample
+      prediction <- predict(subsample.tree, newdata = x_star) #predict at x_star using subsample tree
+      predictions[j] <- prediction
+    }
+    pred_means[i] <- mean(predictions)
+  }
+  
+  
+  #now, take variance of pred_means
+  zeta_1_kn <- var(pred_means)
+  return(zeta_1_kn)
+  
+}
+
+var_k_finder <- function(df, n_z, x_star){
+  predictions <- rep(NA, n_z)
+  for (i in 1:n_z) {
+    subsample_index <- sample(1:nrow(df), k, replace = FALSE) 
+    subsample <- df[subsample_index,]
+    subsample.tree <- rpart(y ~ . , data = subsample,
+                              control = rpart.control(minsplit = 3)) #build a tree using subsample
+    prediction <- predict(subsample.tree, newdata = x_star) #predict at x_star using subsample tree
+    predictions[i] <- prediction
+  }
+  
+  
+  #now, take variance of n_z predictions
+  zeta_k_n_kn <- var(predictions)
+  return(zeta_k_n_kn)
+}
+
+```
+
+
+```{r Confidence Intervals simple}
+n = 200
+m = 200
+k = 30
+reps = 250
+n_z = 50
+n_mc = 250
+x_star <- data.frame(x_1 = 10) #prediction at this point
+
+true_val = 2*10 
+
+
+set.seed(11)
+
+#generating dataset
+x_1 <- runif(n, min = 0, max = 20)
+e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+y = 2*x_1 + e
+df <- data.frame('y' = y,
+                 'x_1' = x_1
+                 ) 
+colnames(df) = c('y', 'x_1')
+
+
+
+var_1 <- var_1_finder(df, n_z, n_mc, x_star)
+var_k <- var_k_finder(df, 500, x_star)
+alpha_hat <- n/m
+
+variance <- (((k^2)/alpha_hat)/m * var_1) + var_k/m
+mean <- ensemble_tree2(df, m, k, x_star)[[2]]
+
+
+
+
+
+LB <- qnorm(.025, mean , sd = sqrt(variance))
+UB <- qnorm(.975, mean , sd = sqrt(variance))
+CI <- c(LB, UB)
+CI #def am not getting the same variance as mentch and hooker. see types of confidence values fig 3 vs this one. 16-25 MAX
+#if i use the limiting distribution variance formula found on pg 17 rather than the one on pg 12, the variance is greatly decreased. going to try to run a couple more so that we can see if i get similar results to the true mean (of the model prediction, not of the underlying regression function). 
+#oh yea, now I'm remembering our discussions about how they have the distribution of prediction / m or * m instead of the actual one... 
+
+
+
+simple_get_CI_sim <- function(reps, n, m, k, n_z, n_mc, x_star, csv_name){
+
+  
+
+    
+  CI_df <- data.frame(LB = rep(NA, reps), UB = rep(NA, reps))
+  alpha_hat <- n/m
+  for (i in 1:reps) {
+    print(i)
+    x_1 <- runif(n, min = 0, max = 20)
+    e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+    y = 2*x_1 + e
+    df <- data.frame('y' = y,
+                   'x_1' = x_1
+                   ) 
+    
+    var_1 <- var_1_finder(df, n_z, n_mc, x_star)
+    var_k <- var_k_finder(df, 500, x_star)
+    
+    variance <- (((k^2)/alpha_hat)/m * var_1) + var_k/m
+    mean <- ensemble_tree2(df, m, k, x_star)[[2]]
+    
+    
+    LB <- qnorm(.025, mean , sd = sqrt(variance))
+    UB <- qnorm(.975, mean , sd = sqrt(variance))
+    CI_df[i, 1] <- LB
+    CI_df[i, 2] <- UB
+   
+    if ((i %% 50) == 0) {
+      write.csv(CI_df, csv_name, row.names = TRUE)
+    }
+
+  }
+  return(CI_df) 
+}
+
+
+simple_get_CI_sim(1, n, m, k, n_z, n_mc, x_star, "simple_small.csv")
+  
+
+mars_get_CI_sim <- function(reps, n, m, k, n_z, n_mc, x_star, csv_name){
+  
+  
+
+    
+  CI_df <- data.frame(LB = rep(NA, reps), UB = rep(NA, reps))
+  alpha_hat <- n/m
+  for (i in 1:reps) {
+    print(i)
+    
+    x_1 <- runif(n, min = 0, max = 1)
+    x_2 <- runif(n, min = 0, max = 1)
+    x_3 <- runif(n, min = 0, max = 1)
+    x_4 <- runif(n, min = 0, max = 1)
+    x_5 <- runif(n, min = 0, max = 1)
+    e <- rnorm(n, mean = 0, sd = sqrt(10))
+    y = 10*sin(pi*x_1*x_2) + 20*(x_3-.05)^2 + (10*x_4) + (5*x_5) + e
+    
+    df <- data.frame('y' = y,
+                     'x_1' = x_1,
+                     'x_2' = x_2,
+                     'x_3' = x_3,
+                     'x_4' = x_4,
+                     'x_5' = x_5)
+    
+    var_1 <- var_1_finder(df, n_z, n_mc, x_star)
+    var_k <- var_k_finder(df, 500, x_star)
+    
+    variance <- (((k^2)/alpha_hat)/m * var_1) + var_k/m
+    mean <- ensemble_tree2(df, m, k, x_star)[[2]]
+    
+    
+    LB <- qnorm(.025, mean , sd = sqrt(variance))
+    UB <- qnorm(.975, mean , sd = sqrt(variance))
+    CI_df[i, 1] <- LB
+    CI_df[i, 2] <- UB
+   
+    if ((i %% 50) == 0) {
+      write.csv(CI_df, csv_name, row.names = TRUE)
+    }
+    
+
+  }
+  return(CI_df) 
+}
+  
+
+mars_get_CI_sim(1, n, m, k, n_z, n_mc, x_star, "data+results/mars_small.csv")
+#seems to be a lot closer than the previous CI with larger variance
+
+#save.image(file='mentch_recreation.RData')
+
+```
+
+
+```{r simulation confidence intervals for simple}
+set.seed(2)
+n = 200
+m = 200
+k = 30
+reps = 250
+n_z = 50
+n_mc = 250
+x_star <- data.frame(x_1 = 10) #prediction at this point
+
+
+#generating dataset
+
+
+
+true_val = 2*10 
+
+
+simple_means <- rep(NA, 1000) # should i use new training set each ensemble when i calculate true mean?
+for (i in 1:1000) {
+  x_1 <- runif(n, min = 0, max = 20)
+  e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+  y = 2*x_1 + e
+  df <- data.frame('y' = y,
+                   'x_1' = x_1)
+  
+  simple_means[i] <- ensemble_tree2(df, m, k, x_star)[[2]]
+  if (i %% 10 == 0){
+    print(c(i, simple_means[i]))
+  }
+    
+}
+
+simple_true_mean <- mean(simple_means)
+
+
+big_CI_df1 <- simple_get_CI_sim(reps, n, m, k, n_z, n_mc, x_star,
+                                "simple_small.csv")
+
+sum((big_CI_df1$LB < true_mean) & (true_mean < big_CI_df1$UB))
+
+
+n = 1000
+m = 1000
+k = 60
+
+big_CI_df2 <- simple_get_CI_sim(reps, n, m, k, n_z, n_mc, x_star,
+                                "simple_big.csv")
+
+sum((big_CI_df2$LB < true_mean) & (true_mean < big_CI_df2$UB))
+
+save.image(file='mentch_recreation2.RData')
+
+
+
+
+```
+
+
+
+```{r simulation confidence intervals for MARS}
+#was not able to completely run this code due to time.
+set.seed(5)
+n = 500
+m = 500
+k = 50
+reps = 250
+n_z = 50
+n_mc = 250
+x_star <- data.frame(x_1 = .5, x_2 = .5, x_3 = .5,
+                     x_4 = .5, x_5 = .5) #prediction at this point
+
+
+
+
+
+true_val = 10*sin(pi*.5*.5) + 20*(.5-.05)^2 + (10*.5) + (5*.5)
+
+
+mars_means <- rep(NA, 1000) # should i use new training set each ensemble when i calculate true mean?
+for (i in 1:1000) {
+  x_1 <- runif(n, min = 0, max = 1)
+  x_2 <- runif(n, min = 0, max = 1)
+  x_3 <- runif(n, min = 0, max = 1)
+  x_4 <- runif(n, min = 0, max = 1)
+  x_5 <- runif(n, min = 0, max = 1)
+  e <- rnorm(n, mean = 0, sd = sqrt(10))
+  y = 10*sin(pi*x_1*x_2) + 20*(x_3-.05)^2 + (10*x_4) + (5*x_5) + e
+
+  df <- data.frame('y' = y,
+                   'x_1' = x_1,
+                   'x_2' = x_2,
+                   'x_3' = x_3,
+                   'x_4' = x_4,
+                   'x_5' = x_5)
+
+  mars_means[i] <- ensemble_tree2(df, m, k, x_star)[[2]]
+  print(c(i, mars_means[i]))
+}
+
+mars_true_mean <- mean(mars_means)
+
+
+big_CI_df_mars_small <- mars_get_CI_sim(reps, n, m, k, n_z, n_mc, x_star,
+                                        "mars_small.csv")
+
+sum((big_CI_df_mars_small$LB < true_mean) & (true_mean < big_CI_df_mars_small$UB))
+
+
+n = 1000
+m = 1000
+k = 75
+
+big_CI_df_mars_big <- mars_get_CI_sim(reps, n, m, k, n_z, n_mc, x_star,
+                                      "mars_big.csv")
+
+sum((big_CI_df_mars_big$LB < mars_true_mean) & (mars_true_mean < big_CI_df_mars_big$UB))
+
+save.image(file='mentch_recreation2.RData')
+
+
+```
+
+
+```{r making CI plots}
+#load('mentch_recreation2.RData')
+library(cowplot)
+
+
+#assume  we have true mean
+
+x <- 1:250
+gg_df <- data.frame(big_CI_df1, x)
+
+simpleCIplot_1 <- ggplot(data = gg_df,
+                       mapping = aes(x = x, xend = x, y = LB, yend = UB)) +
+  geom_segment() + 
+  geom_hline(yintercept = simple_true_mean, color = "tomato") + 
+  labs(xlab = "", ylab = "Confidence Interval",
+       title = "Confidence Intervals for SLR, \n n=200, m=200, k=30") +
+  ylim(16,24)
+simpleCIplot_1
+
+gg_df <- data.frame(big_CI_df2, x)
+
+simpleCIplot_2 <- ggplot(data = gg_df, mapping = aes(x = x, xend = x, y = LB, yend = UB)) +
+  geom_segment() + 
+  geom_hline(yintercept = simple_true_mean, color = "tomato") + 
+  labs(xlab = "", ylab = "Confidence Interval",
+       title = "Confidence Intervals for SLR, \n n=1000, m=1000, k=60")+
+  ylim(16,24)
+simpleCIplot_2
+
+plot_grid(simpleCIplot_1, simpleCIplot_2)
+
+mars_gg_df <- data.frame(big_CI_df_mars_small, x)
+mars_gg_df2 <- data.frame(big_CI_df_mars_big, x)
+
+
+marsCIplot_1 <- ggplot(data = mars_gg_df, mapping = aes(x = x, xend = x, y = LB, yend = UB)) +
+  geom_segment() + 
+  geom_hline(yintercept = mars_true_mean, color = "tomato") + 
+  labs(xlab = "", ylab = "Confidence Interval",
+       title = "Confidence Intervals for Mars, \n n=500, m=500, k=50")+
+  ylim(15,22)
+marsCIplot_1
+
+
+marsCIplot_2 <- ggplot(data = mars_gg_df2, mapping = aes(x = x, xend = x, y = LB, yend = UB)) +
+  geom_segment() + 
+  geom_hline(yintercept = mars_true_mean, color = "tomato") + 
+  labs(xlab = "", ylab = "Confidence Interval",
+       title = "Confidence Intervals for Mars, \n n=1000, m=1000, k=75")+
+  ylim(15,22)
+marsCIplot_2
+
+plot_grid(marsCIplot_1, marsCIplot_2)
+
+
+```
+
+
+```{r hypothesis testing MARS}
+n = 1000
+m = 1000
+k = 75
+n_z = 100 #estimate covariance only once since interested in distribution of test statistics
+n_mc = 5000
+reps = 250
+
+set.seed(4)
+x_1 <- runif(n, min = 0, max = 1)
+x_2 <- runif(n, min = 0, max = 1)
+x_3 <- runif(n, min = 0, max = 1)
+x_4 <- runif(n, min = 0, max = 1)
+x_5 <- runif(n, min = 0, max = 1)
+x_6 <- runif(n, min = 0, max = 1)
+e <- rnorm(n, mean = 0, sd = sqrt(10))
+y = 10*sin(pi*x_1*x_2) + 20*(x_3-.05)^2 + (10*x_4) + (5*x_5) + e
+
+df <- data.frame('y' = y,
+                 'x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5,
+                 'x_6' = x_6)
+
+
+#making test set
+x_1 <- seq(0,1, by = (1/40))
+x_2 <- seq(0,1, by = (1/40))
+x_3 <- seq(0,1, by = (1/40))
+x_4 <- seq(0,1, by = (1/40))
+x_5 <- seq(0,1, by = (1/40))
+x_6 <- seq(0,1, by = (1/40))
+
+test_set <- data.frame('x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5,
+                 'x_6' = x_6)
+
+
+x_1 <- seq(.25, .75, by = (.5/40))
+x_2 <- seq(.25, .75, by = (.5/40))
+x_3 <- seq(.25, .75, by = (.5/40))
+x_4 <- seq(.25, .75, by = (.5/40))
+x_5 <- seq(.25, .75, by = (.5/40))
+x_6 <- seq(.25, .75, by = (.5/40))
+
+test_set_centered <- data.frame('x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5,
+                 'x_6' = x_6)
+
+
+
+
+```
+
+
+
+
+<!-- ```{r Confidence Intervals Mars} -->
+<!-- n = 500 -->
+<!-- m = 500 -->
+<!-- k = 50 -->
+<!-- reps = 250 -->
+<!-- n_z = 50 -->
+<!-- n_mc = 250 -->
+<!-- x_star <- data.frame(x_1 = .5, x_2 = .5, x_3 = .5, -->
+<!--                      x_4 = .5, x_5 = .5) #prediction at this point -->
+
+<!-- true_val = 10*sin(pi*.5*.5) + 20*(.5-.05)^2 + (10*.5) + (5*.5)  -->
+
+
+<!-- set.seed(11) -->
+
+<!-- #generating dataset -->
+<!-- x_1 <- runif(n, min = 0, max = 1) -->
+<!-- x_2 <- runif(n, min = 0, max = 1) -->
+<!-- x_3 <- runif(n, min = 0, max = 1) -->
+<!-- x_4 <- runif(n, min = 0, max = 1) -->
+<!-- x_5 <- runif(n, min = 0, max = 1) -->
+<!-- e <- rnorm(n, mean = 0, sd = sqrt(10)) -->
+<!-- y = 10*sin(pi*x_1*x_2) + 20*(x_3-.05)^2 + (10*x_4) + (5*x_5) + e -->
+
+<!-- df <- data.frame('y' = y, -->
+<!--                  'x_1' = x_1, -->
+<!--                  'x_2' = x_2, -->
+<!--                  'x_3' = x_3, -->
+<!--                  'x_4' = x_4, -->
+<!--                  'x_5' = x_5)  -->
+<!-- colnames(df) = c('y', 'x_1', 'x_2', 'x_3', 'x_4', 'x_5') -->
+
+<!-- #produce subbagged ensemble -->
+<!-- results <- ensemble_tree(df, m, k, x_star) -->
+
+<!-- var_1 <- var_1_finder(df, n_z, n_mc, x_star) -->
+<!-- var_k <- var_k_finder(df, n_z, x_star) -->
+<!-- alpha_hat <- n/m -->
+<!-- variance <- (((k^2)/alpha_hat) * var_1) + var_k -->
+<!-- mean <- ensemble_tree2(df, m, k, x_star)[[2]] -->
+
+
+
+<!-- variance <- (((k^2) / alpha_hat)*var_1) + var_k -->
+
+<!-- LB <- qnorm(.025, mean , sd = sqrt(variance)) -->
+<!-- UB <- qnorm(.975, mean , sd = sqrt(variance)) -->
+<!-- CI <- c(LB, UB) -->
+<!-- CI -->
+
+
+<!-- ``` -->
+

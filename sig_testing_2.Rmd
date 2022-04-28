@@ -1,0 +1,817 @@
+
+Notes:
+Building Subsampled Trees
+- n = size of sample
+- m = number of subsamples
+- k = sample size
+Estimating Variance
+- n_z = repeat process n_z times. (n_z sets of fixed points)
+- n_mc = number of subsamples drawn (monte carlo)
+- x_star = point at which we make prediction at
+
+```{r loading libraries and main functions, message = FALSE}
+library(tidyverse)
+library(tidymodels)
+library(tree)
+library(ISLR)
+library(randomForest)
+library(rpart)
+library(rlist)
+library(here)
+
+
+ensemble_tree2 <- function(df, m, k, x_star, cp = .01){
+  
+  predictions <- data.frame(y_hat = rep(NA, m))
+  for (i in 1:m) {
+    subsample_index <- sample(1:nrow(df), k, replace = FALSE) 
+    subsample <- df[subsample_index,]
+    subsample.tree <- rpart(y ~ . , data = subsample,
+                            control = rpart.control(minsplit = 3,
+                                                    cp = cp)) 
+    prediction <- predict(subsample.tree, newdata = x_star)
+    predictions[i,1] <- prediction
+  }
+  y_hat_av <- mean(predictions$y_hat)
+  list1 <- list(predictions = predictions, y_hat_av = y_hat_av)
+  return(list1)
+
+}
+
+
+var_1_finder <- function(df, n_z, n_mc, k, x_star, cp = .01){
+  predictions <- rep(NA, n_mc)
+  pred_means <- rep(NA, n_z)
+  for (i in 1:n_z) {
+    index <- sample(1:nrow(df),1)
+    z_tilde <- df[index,] 
+    for (j in 1:n_mc) {
+      vec = 1:nrow(df)
+      vec = vec[-index]
+      subsample_index <- sample(vec, k-1, replace = FALSE) 
+      subsample <- df[subsample_index,]
+      subsample[k,] <- z_tilde 
+      subsample.tree <- rpart(y ~ . , data = subsample,
+                              control = rpart.control(minsplit = 3,
+                                                    cp = cp)) 
+      prediction <- predict(subsample.tree, newdata = x_star) 
+      predictions[j] <- prediction
+    }
+    pred_means[i] <- mean(predictions)
+  }
+  zeta_1_kn <- var(pred_means)
+  return(zeta_1_kn)
+  
+}
+
+var_k_finder <- function(df, n_z, k, x_star, cp = .01){
+  predictions <- rep(NA, n_z)
+  for (i in 1:n_z) {
+    subsample_index <- sample(1:nrow(df), k, replace = FALSE) 
+    subsample <- df[subsample_index,]
+    subsample.tree <- rpart(y ~ . , data = subsample,
+                              control = rpart.control(minsplit = 3,
+                                                    cp = cp)) 
+    prediction <- predict(subsample.tree, newdata = x_star) 
+    predictions[i] <- prediction
+  }
+  zeta_k_n_kn <- var(predictions)
+  return(zeta_k_n_kn)
+}
+
+ensemble_tree_hp <- function(df, excluded_var, test_set, m, k, cp = .01){
+    excluded_var <- enquo(excluded_var) #define variable to exclude
+    prediction_full <- rep(NA, dim(test_set)[1]) #set vector for the predictions including all variables at each test point 
+    prediction_r <- rep(NA, dim(test_set)[1]) #set vector for the predictions only restricted variables at each test point
+  
+    predictions <- list(y_hat_full = rep(NA, m), 
+                            y_hat_r = rep(NA, m)) #make list for predictions. two vectors, m (number of subsamples) long
+
+  for (i in 1:m) { #take m subsamples
+    subsample_index <- sample(1:nrow(df), k, replace = FALSE) #select rows from df for subsample
+    subsample <- df[subsample_index,] 
+    subsample_r <- subsample %>%
+      select(-!!excluded_var) #remove excluded variable
+    subsample.tree <- rpart(y ~ . , data = subsample,
+                            control = rpart.control(minsplit = 3,
+                                                    cp = .01))  #make full tree using subsample
+    subsample_r.tree <- rpart(y ~ . , data = subsample_r,
+                            control = rpart.control(minsplit = 3,
+                                                    cp = .01)) #make restricted tree using subsample, without excluded variable
+   
+    for (j in 1:dim(test_set)[1]) {
+      prediction_full[j] <- predict(subsample.tree, newdata = test_set[j,])
+      prediction_r[j] <- predict(subsample_r.tree, newdata = test_set[j,])
+    }
+    #make (number of test points) predictions, store in a vector
+    
+
+    predictions[[1]][i] <- list(prediction_full) #store vector as the first input of prediction_full
+    predictions[[2]][i] <- list(prediction_r) #store vector as the first input of prediction_r
+    #print(i)
+  
+  }
+  
+  y_hat_av_full <- vector(length = length(predictions$y_hat_full[[1]])) #make a vector with length of the test set
+  y_hat_av_r <- vector(length = length(predictions$y_hat_full[[1]])) #make a vector with length of the test set
+  empty_vec_full <- vector(length = m) #make a vector with length of how many subsamples we take
+  empty_vec_r <- vector(length = m) #make a vector with length of how many subsamples we take
+  for (j in 1:length(predictions$y_hat_full[[1]])){
+    
+    for (i in 1:m){
+      
+    empty_vec_full[i] <- predictions$y_hat_full[[i]][j] #fill empty vector (length m) with m predictions (full variables) at single test point 
+    empty_vec_r[i] <- predictions$y_hat_r[[i]][j] #fill empty vector (length m) with m predictions (restricted variables) at single test point 
+    }
+    y_hat_av_full[j] <- mean(empty_vec_full) #insert mean prediction of full predictions
+    y_hat_av_r[j] <- mean(empty_vec_r) #insert mean prediction of restricted predictions
+  }
+  
+  dif_vec <- y_hat_av_full - y_hat_av_r #calculating difference vector
+  
+  return(list(y_hat_av_full = y_hat_av_full, y_hat_av_r = y_hat_av_r,
+              dif_vec = dif_vec))
+
+}
+
+
+var_1_finder_hp <- function(df, excluded_var, test_set,
+                            n_z, n_mc, k, cp = .01){
+  mean_difs <- vector(mode = "list", length = n_z) #create list of lists. n_z lists
+  diff_in_predictions <- vector(mode = "list", length = n_mc) #create list of lists. n_mc lists
+
+  
+
+  excluded_var <- enquo(excluded_var)  
+
+  prediction_full <- rep(NA, dim(test_set)[1]) #empty vector for full predictions
+  prediction_r <- rep(NA, dim(test_set)[1]) #empty vector for restricted predictions
+   
+  
+  for (i in 1:n_z) {
+    print(c("n_z: ", i))
+    index <- sample(1:nrow(df),1)
+    z_tilde <- df[index,] #selecting initial fixed point
+    for (j in 1:n_mc) {
+      vec = 1:nrow(df)
+      vec = vec[-index]
+      subsample_index <- sample(vec, k-1, replace = FALSE) #subsample size k-1, not including index
+      subsample <- df[subsample_index,]
+      subsample[k,] <- z_tilde #manually including z_tilde, now have our subsample
+      subsample.tree <- rpart(y ~ . , data = subsample,
+                              control = rpart.control(minsplit = 3,
+                                                    cp = cp)) #build a tree full using subsample
+      subsample_r <- subsample %>%
+        select(-!!excluded_var) #changed x_6 to !!excluded_var
+      subsample_r.tree <- rpart(y ~ . , data = subsample_r,
+                                control = rpart.control(minsplit = 3,
+                                                        cp = cp)) #build a tree restricted using subsample
+        
+    for (p in 1:dim(test_set)[1]) {
+      prediction_full[p] <- predict(subsample.tree, newdata = test_set[p,]) #predict at test point using full tree
+      prediction_r[p] <- predict(subsample_r.tree, newdata = test_set[p,]) #predict at test point using restricted tree
+    }
+    diff_in_predictions[[j]] <- (prediction_full - prediction_r)
+    #print(c(i, j))
+
+    }
+    #calculating mean of predictions. should be n_z means
+    sum_dif <- diff_in_predictions[[1]] #taking mean of predictions differences
+    for (p in 2:length(diff_in_predictions)) {
+      sum_dif <- sum_dif + diff_in_predictions[[p]]
+    }
+    mean_dif <- sum_dif / length(diff_in_predictions)
+    mean_difs[[i]] <- mean_dif 
+  }
+  mean_dif_matrix <- as.matrix(t(data.frame(mean_difs))) #getting matrix in right shape
+  rownames(mean_dif_matrix) <- NULL
+  return(cov(mean_dif_matrix))
+} 
+
+
+
+var_k_finder_hp <- function(df, excluded_var, test_set,
+                            n_z, k, cp = .01){
+  pred_difs <- vector(mode = "list", length = n_z)
+  excluded_var <- enquo(excluded_var)  
+
+  prediction_full <- rep(NA, dim(test_set)[1])
+  prediction_r <- rep(NA, dim(test_set)[1])
+  
+  
+  for (i in 1:n_z) {
+    subsample_index <- sample(1:nrow(df), k, replace = FALSE) 
+    subsample <- df[subsample_index,]
+    
+    subsample.tree <- rpart(y ~ . , data = subsample,
+                              control = rpart.control(minsplit = 3,
+                                                    cp = cp)) #build a tree using subsample
+    subsample_r <- subsample %>%
+      select(-!!excluded_var) #changed x_6 to !!excluded_var
+    subsample_r.tree <- rpart(y ~ . , data = subsample_r,
+                              control = rpart.control(minsplit = 3,
+                                                      cp = cp))
+        
+  for (p in 1:dim(test_set)[1]) {
+    prediction_full[p] <- predict(subsample.tree, newdata = test_set[p,])
+    prediction_r[p] <- predict(subsample_r.tree, newdata = test_set[p,])
+    }
+  pred_difs[[i]] <- (prediction_full - prediction_r)
+  #print(i)
+  }
+  
+  pred_dif_matrix <- as.matrix(t(data.frame(pred_difs)))
+  rownames(pred_dif_matrix) <- NULL
+  return(cov(pred_dif_matrix))
+}
+
+
+
+#going to make two functions that get the parameters and another that gets the test stat seperately. that way, won't lose all work if matrix no solvable
+get_parameters <- function(df, excluded_var, test_set,
+                           m, n_z, n_mc, k, cp = .01){
+  ex_var <- enquo(excluded_var)  
+  print("getting ensemble results")
+  ensemble_results <- ensemble_tree_hp(df, !!ex_var, test_set, m, k, cp = cp)
+  u_hat <- t(ensemble_results$dif_vec)
+  
+  print("getting sigma_1")
+  sigma_1 <- var_1_finder_hp(df, !!ex_var, test_set,
+                  n_z = n_z,
+                  n_mc = n_mc, k = k,  cp = cp)
+  
+  print("getting sigma_k")
+  sigma_k <- var_k_finder_hp(df, !!ex_var, test_set,
+                  n_z = n_z, k = k, cp = cp)
+  parameters_list <- list(ensemble_results = ensemble_results,
+                           u_hat = u_hat, 
+                           sigma_1 = sigma_1,
+                           sigma_k = sigma_k)
+  return(parameters_list)
+}
+
+
+get_test_stat <- function(n, m, k, parameters_list){
+  alpha_hat = n/m
+  sigma_1 <- parameters_list$sigma_1
+  sigma_k <- parameters_list$sigma_k
+  u_hat <- parameters_list$u_hat
+  
+  SIGMA <- ((1/alpha_hat) * (k^2/m) *sigma_1) + (sigma_k /m)
+  
+  test_stat <-  (u_hat) %*% solve(SIGMA) %*% t(u_hat)
+  p_val <- 1 - pchisq(test_stat, df = dim(test_set)[1])
+  results <- list(ensemble_results =  parameters_list$ensemble_results,
+                  u_hat = parameters_list$u_hat, 
+                  sigma_1 =  parameters_list$sigma_1,
+                  sigma_k =  parameters_list$sigma_k,
+                  SIGMA = SIGMA,
+                  test_stat = test_stat,
+                  p_val = p_val
+                  )
+  return(results)
+}
+  
+```
+
+```{r}
+many_results_single_both_var <- list.load(
+  'data_and_results/many_results_single_both_var.rdata')
+many_results_many_var <- read_csv(here("data_and_results", "many_results_many_var.csv")) #dataframe version of many_results_single both var
+
+sig_sim_small_k <- list.load(here("data_and_results", "sig_sim_small_k.rdata")) #dataframe version of many_results_single both var
+
+
+#including these in my thesis:
+many_results_many_var <- read_csv(here("data_and_results", "many_results_many_var.csv"))
+poly_test_6_100 <- list.load('data_and_results/poly_test_6_100.rdata')
+poly_test_6_40 <- list.load('data_and_results/poly_test_6_40.rdata')
+poly_test_6_20 <- list.load('data_and_results/poly_test_6_20.rdata')
+poly_test_6_10 <- list.load('data_and_results/poly_test_6_10.rdata')
+poly_test_6_5 <- list.load('data_and_results/poly_test_6_5.rdata')
+
+
+```
+
+
+
+
+
+
+
+```{r single test point many times}
+n = 1000
+m = 1000
+k = 75
+#going with reduced n_z, n_mc for compoutational reasons
+n_z = 30
+n_mc = 5000
+
+many_results_single_both_var <- list(
+                            results_x1 = rep(list(NA), 100),
+                            results_x2 = rep(list(NA), 100))
+
+many_results_single_both_var <- list.load(
+  'data_and_results/many_results_single_both_var.rdata')
+
+
+for (i in 
+     (length(many_results_single_both_var$results_x1) - sum(is.na(many_results_single_both_var$results_x1))):100) { #start 1 + where we left off
+  print(i)
+  set.seed(i)
+  x_1 <- runif(n, min = 0, max = 1)
+  x_2 <- runif(n, min = 0, max = 1)
+  e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+  y = 5*x_1 + e
+  df <- data.frame('y' = y,
+                   'x_1' = x_1,
+                   'x_2' = x_2)
+  
+  #making test point
+  test_set <- data.frame('x_1' = .5,
+                   'x_2' = .5)
+  
+  
+  param_x1 <- get_parameters(df, x_1, test_set, 
+                                           m, n_z, n_mc, k, cp = .01)
+  
+  param_x2 <- get_parameters(df, x_2, test_set,
+                                           m, n_z, n_mc, k, cp = .01)
+  
+  results_x1 <- get_test_stat(n, m, k, param_x1)
+  
+  results_x2 <- get_test_stat(n, m, k, param_x2)
+  
+  many_results_single_both_var$results_x1[[i]] <- results_x1
+  many_results_single_both_var$results_x2[[i]] <- results_x2
+  list.save(many_results_single_both_var,
+          'data_and_results/many_results_single_both_var.rdata') #save within for loop
+
+}
+
+```
+
+
+```{r comparing the single variance calculation and many calculation}
+# many_results_one_var the single variance calculation
+# many_results_single_both_var the many variance calculations
+#turning list into nicer data frame
+many_results_many_var <- data.frame(Sigma_1_x1 = rep(NA, 100),
+                                   Sigma_k_x1 = rep(NA, 100),
+                                   SIGMA_x1 = rep(NA, 100),
+                                   Sigma_1_x2 = rep(NA, 100),
+                                   Sigma_k_x2 = rep(NA, 100),
+                                   SIGMA_x2 = rep(NA, 100),
+                                   uhat_x1 = rep(NA, 100),
+                                   uhat_x2 = rep(NA, 100),
+                                   teststat_x1 = rep(NA, 100),
+                                   teststat_x2 = rep(NA, 100),
+                                   pval_x1 = rep(NA, 100),
+                                   pval_x2 = rep(NA, 100))
+
+for (i in 1:100){
+  many_results_many_var$Sigma_1_x1[i] <- many_results_single_both_var$results_x1[[i]]$sigma_1
+  many_results_many_var$Sigma_k_x1[i] <- many_results_single_both_var$results_x1[[i]]$sigma_k
+  many_results_many_var$SIGMA_x1[i] <- many_results_single_both_var$results_x1[[i]]$SIGMA
+  many_results_many_var$uhat_x1[i] <- many_results_single_both_var$results_x1[[i]]$u_hat
+  many_results_many_var$teststat_x1[i] <- many_results_single_both_var$results_x1[[i]]$test_stat
+  many_results_many_var$pval_x1[i] <- many_results_single_both_var$results_x1[[i]]$p_val
+  
+  many_results_many_var$Sigma_1_x2[i] <- many_results_single_both_var$results_x2[[i]]$sigma_1
+  many_results_many_var$Sigma_k_x2[i] <- many_results_single_both_var$results_x2[[i]]$sigma_k
+  many_results_many_var$SIGMA_x2[i] <- many_results_single_both_var$results_x2[[i]]$SIGMA
+  many_results_many_var$uhat_x2[i] <- many_results_single_both_var$results_x2[[i]]$u_hat
+  many_results_many_var$teststat_x2[i] <- many_results_single_both_var$results_x2[[i]]$test_stat
+  many_results_many_var$pval_x2[i] <- many_results_single_both_var$results_x2[[i]]$p_val
+}
+
+write_csv(many_results_many_var, here("data_and_results", "many_results_many_var.csv"))
+
+sum(many_results_many_var$pval_x1 < .05)
+sum(many_results_many_var$pval_x2 < .05)
+
+
+many_results_many_var_new <- many_results_many_var %>%
+  mutate(teststat_x1_2 = uhat_x1^2,
+         teststat_x2_2 = uhat_x2^2,
+         pval_x1_2 =  1 - pchisq(teststat_x1_2, df = 1),
+         pval_x2_2 =  1 - pchisq(teststat_x2_2, df = 1))
+
+sum(many_results_many_var_new$pval_x1_2 < .05)
+sum(many_results_many_var_new$pval_x2_2 < .05)
+
+```
+
+
+
+```{r sig simulations with small k}
+n = 1000
+m = 1000
+k = 30
+#going with reduced n_z, n_mc for compoutational reasons
+n_z = 30
+n_mc = 5000
+
+
+many_results_single_both_var <- list(
+                            results_x1 = rep(list(NA), 100),
+                            results_x2 = rep(list(NA), 100))
+
+many_results_single_both_var <- list.load(
+  'data_and_results/sig_sim_small_k.rdata')
+
+
+for (i in 
+     (length(many_results_single_both_var$results_x1) - sum(is.na(many_results_single_both_var$results_x1)) + 1) :100) { #start 1 + where we left off
+  print(i)
+  set.seed(i)
+  x_1 <- runif(n, min = 0, max = 1)
+  x_2 <- runif(n, min = 0, max = 1)
+  e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+  y = 5*x_1 + e
+  df <- data.frame('y' = y,
+                   'x_1' = x_1,
+                   'x_2' = x_2)
+  
+  #making test point
+  test_set <- data.frame('x_1' = .5,
+                   'x_2' = .5)
+  
+  
+  param_x1 <- get_parameters(df, x_1, test_set, 
+                                           m, n_z, n_mc, k, cp = .01)
+  
+  param_x2 <- get_parameters(df, x_2, test_set,
+                                           m, n_z, n_mc, k, cp = .01)
+  
+  results_x1 <- get_test_stat(n, m, k, param_x1)
+  
+  results_x2 <- get_test_stat(n, m, k, param_x2)
+  
+  many_results_single_both_var$results_x1[[i]] <- results_x1
+  many_results_single_both_var$results_x2[[i]] <- results_x2
+  list.save(many_results_single_both_var,
+          'data_and_results/sig_sim_small_k.rdata') #save within for loop
+
+}
+
+sig_sim_small_k_df <- data.frame(Sigma_1_x1 = rep(NA, 100),
+                                   Sigma_k_x1 = rep(NA, 100),
+                                   SIGMA_x1 = rep(NA, 100),
+                                   Sigma_1_x2 = rep(NA, 100),
+                                   Sigma_k_x2 = rep(NA, 100),
+                                   SIGMA_x2 = rep(NA, 100),
+                                   uhat_x1 = rep(NA, 100),
+                                   uhat_x2 = rep(NA, 100),
+                                   teststat_x1 = rep(NA, 100),
+                                   teststat_x2 = rep(NA, 100),
+                                   pval_x1 = rep(NA, 100),
+                                   pval_x2 = rep(NA, 100))
+
+for (i in 1:100){
+  sig_sim_small_k_df$Sigma_1_x1[i] <- sig_sim_small_k$results_x1[[i]]$sigma_1
+  sig_sim_small_k_df$Sigma_k_x1[i] <- sig_sim_small_k$results_x1[[i]]$sigma_k
+  sig_sim_small_k_df$SIGMA_x1[i] <- sig_sim_small_k$results_x1[[i]]$SIGMA
+  sig_sim_small_k_df$uhat_x1[i] <- sig_sim_small_k$results_x1[[i]]$u_hat
+  sig_sim_small_k_df$teststat_x1[i] <- sig_sim_small_k$results_x1[[i]]$test_stat
+  sig_sim_small_k_df$pval_x1[i] <- sig_sim_small_k$results_x1[[i]]$p_val
+  
+  sig_sim_small_k_df$Sigma_1_x2[i] <- sig_sim_small_k$results_x2[[i]]$sigma_1
+  sig_sim_small_k_df$Sigma_k_x2[i] <- sig_sim_small_k$results_x2[[i]]$sigma_k
+  sig_sim_small_k_df$SIGMA_x2[i] <- sig_sim_small_k$results_x2[[i]]$SIGMA
+  sig_sim_small_k_df$uhat_x2[i] <- sig_sim_small_k$results_x2[[i]]$u_hat
+  sig_sim_small_k_df$teststat_x2[i] <- sig_sim_small_k$results_x2[[i]]$test_stat
+  sig_sim_small_k_df$pval_x2[i] <- sig_sim_small_k$results_x2[[i]]$p_val
+}
+
+sig_sim_small_k_df <- na.omit(sig_sim_small_k_df)
+sum(sig_sim_small_k_df$pval_x1 < .05)
+sum(sig_sim_small_k_df$pval_x2 < .05)
+
+sig_sim_small_k_df_new <- sig_sim_small_k_df %>%
+  mutate(teststat_x1_2 = uhat_x1^2,
+         teststat_x2_2 = uhat_x2^2,
+         pval_x1_2 =  1 - pchisq(teststat_x1_2, df = 1),
+         pval_x2_2 =  1 - pchisq(teststat_x2_2, df = 1))
+
+sum(sig_sim_small_k_df_new$pval_x1_2 < .05)
+sum(sig_sim_small_k_df_new$pval_x2_2 < .05)
+
+
+write_csv(sig_sim_small_k_df, here('data_and_results', 'sig_sim_small_k_df.csv'))
+
+```
+
+
+
+
+```{r comparing variance calculations with variance of predictions}
+set.seed(2)
+n = 200
+m = 200
+k = 30
+x_star <- data.frame(x_1 = 10) #prediction at this point
+#going with reduced n_z, n_mc for compoutational reasons
+n_z = 30
+n_mc = 5000
+
+rep = rep(NA, 10000)
+prediction = rep(NA, 10000)
+sigma1 = rep(NA, 100)
+sigmak = rep(NA, 100)
+variance = rep(NA, 100)
+
+for (i in 1:10000) {
+  print(i)
+  rep[i] = i %% 100 
+  x_1 <- runif(n, min = 0, max = 20)
+  e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+  y = 5*x_1 + e
+  df <- data.frame('y' = y,
+                     'x_1' = x_1)
+  
+  prediction[i] <- ensemble_tree2(df, m, k, x_star, cp = .01)$y_hat_av
+}
+
+
+for (i in 1:100) {
+  print(i)
+  
+  x_1 <- runif(n, min = 0, max = 20)
+  e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+  y = 5*x_1 + e
+  df <- data.frame('y' = y,
+                     'x_1' = x_1)
+  sigma1[i] <- var_1_finder(df,
+                            n_z = 50,
+                            n_mc = 1000,
+                            k = k,
+                            x_star = x_star,
+                            cp = .01)
+  sigmak[i] <- var_k_finder(df,
+                            n_z = 5000,
+                            k = k,
+                            x_star = x_star,
+                            cp = .01)
+  variance[i] <- (1/(n/m))*(k^2 / m) * sigma1[i] + (1/m) * sigmak[i]
+}
+
+pred_df <- data.frame(rep = rep,
+                      prediction = prediction) %>%
+  group_by(rep) %>%
+  summarize(mean_pred = mean(prediction),
+            var_pred = var(prediction)) %>%
+  mutate(var_calc = variance)
+
+write_csv(pred_df, path = here('data_and_results', 'predictions_and_variances_df.csv'))
+
+
+
+pred_df <- read_csv(here('data_and_results', 'predictions_and_variances_df.csv') )
+
+mean(pred_df$var_pred)
+mean(pred_df$var_calc)
+var(pred_df$var_pred)
+var(pred_df$var_calc)
+```
+
+
+
+
+
+idea behind this next chunk:
+idea: what if the non singular matrix error due to dependent columns is because we have too many test points… difference between prediction at  (0,0,0,0,0,0) and  (.025, .025, … ,.025) not much.. what if prediction is the same?
+ try testing with 10 test points, 5 points maybe?
+
+```{r}
+poly_test_6_100 <- list.load('data_and_results/poly_test_6_100.rdata')
+poly_test_6_40 <- list.load('data_and_results/poly_test_6_40.rdata')
+poly_test_6_20 <- list.load('data_and_results/poly_test_6_20.rdata')
+poly_test_6_10 <- list.load('data_and_results/poly_test_6_10.rdata')
+poly_test_6_5 <- list.load('data_and_results/poly_test_6_5.rdata')
+
+#making df
+set.seed(11)
+n = 1000
+m = 1000
+k = 75
+n_z = 30
+n_mc = 5000
+
+
+x_1 <- runif(n, min = 0, max = 1)
+x_2 <- runif(n, min = 0, max = 1)
+x_3 <- runif(n, min = 0, max = 1)
+x_4 <- runif(n, min = 0, max = 1)
+x_5 <- runif(n, min = 0, max = 1)
+x_6 <- runif(n, min = 0, max = 1)
+
+e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+y <- 2*x_1 + 4*x_1^2 + 3*x_2^2 + 4*x_3^3 + .1*x_5
+ 
+df <- data.frame('y' = y,
+                 'x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5,
+                 'x_6' = x_6)
+
+
+
+print("100 test points")
+set.seed(100)
+n = 1000
+m = 1000
+k = 75
+n_z = 30
+n_mc = 5000
+
+
+#making test sets
+x_1 <- seq(0,1, by = (1/100))
+x_2 <- seq(0,1, by = (1/100))
+x_3 <- seq(0,1, by = (1/100))
+x_4 <- seq(0,1, by = (1/100))
+x_5 <- seq(0,1, by = (1/100))
+x_6 <- seq(0,1, by = (1/100))
+
+
+test_set <- data.frame('x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5,
+                 'x_6' = x_6)
+
+
+poly_test_6_100 <- get_parameters(df, x_6, test_set, m, n_z, n_mc, k, cp = .01)
+
+
+#saving parameters
+list.save(poly_test_6_100, 'data_and_results/poly_test_6_100.rdata')
+
+
+# #uncomment and run for p values, test stats
+results_poly_6_100 <- get_test_stat(n, m, k, poly_test_6_100)
+
+print("40 test points")
+set.seed(4)
+
+
+#making test sets
+x_1 <- seq(0,1, by = (1/40))
+x_2 <- seq(0,1, by = (1/40))
+x_3 <- seq(0,1, by = (1/40))
+x_4 <- seq(0,1, by = (1/40))
+x_5 <- seq(0,1, by = (1/40))
+x_6 <- seq(0,1, by = (1/40))
+
+
+test_set <- data.frame('x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5,
+                 'x_6' = x_6)
+
+
+poly_test_6_40 <- get_parameters(df, x_6, test_set, m, n_z, n_mc, k, cp = .01)
+
+
+#saving parameters
+list.save(poly_test_6_40, 'data_and_results/poly_test_6_40.rdata')
+
+
+# #uncomment and run for p values, test stats
+#results_poly_6_40 <- get_test_stat(n, m, k, poly_test_6_40)
+
+
+#try less test points?
+#20
+print("20 test points")
+set.seed(20)
+x_1 <- seq(0,1, by = (1/20))
+x_2 <- seq(0,1, by = (1/20))
+x_3 <- seq(0,1, by = (1/20))
+x_4 <- seq(0,1, by = (1/20))
+x_5 <- seq(0,1, by = (1/20))
+x_6 <- seq(0,1, by = (1/20))
+
+
+
+test_set <- data.frame('x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5,
+                 'x_6' = x_6)
+
+
+poly_test_6_20 <- get_parameters(df, x_6, test_set, m, n_z, n_mc, k, cp = .01)
+#saving parameters
+list.save(poly_test_6_20, 'data_and_results/poly_test_6_20.rdata')
+
+
+# #uncomment and run for p values, test stats
+results_poly_6_20 <- get_test_stat(n, m, k, poly_test_6_20)
+
+
+#10
+print("10 test points")
+set.seed(10)
+x_1 <- seq(0,1, by = (1/10))
+x_2 <- seq(0,1, by = (1/10))
+x_3 <- seq(0,1, by = (1/10))
+x_4 <- seq(0,1, by = (1/10))
+x_5 <- seq(0,1, by = (1/10))
+x_6 <- seq(0,1, by = (1/10))
+
+
+test_set <- data.frame('x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5,
+                 'x_6' = x_6)
+
+
+poly_test_6_10 <- get_parameters(df, x_6, test_set, m, n_z, n_mc, k, cp = .01)
+#saving parameters
+list.save(poly_test_6_10, 'data_and_results/poly_test_6_10.rdata')
+
+
+# #uncomment and run for p values, test stats
+results_poly_6_10 <- get_test_stat(n, m, k, poly_test_6_10)
+
+#5
+print("5 test points")
+set.seed(5)
+x_1 <- seq(0,1, by = (1/5))
+x_2 <- seq(0,1, by = (1/5))
+x_3 <- seq(0,1, by = (1/5))
+x_4 <- seq(0,1, by = (1/5))
+x_5 <- seq(0,1, by = (1/5))
+x_6 <- seq(0,1, by = (1/5))
+
+
+test_set <- data.frame('x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5,
+                 'x_6' = x_6)
+
+
+
+
+poly_test_1_5 <- get_parameters(df, x_1, test_set, m, n_z, n_mc, k, cp = .01)
+#saving parameters
+list.save(poly_test_1_5, 'data_and_results/poly_test_1_5.rdata')
+
+
+# #uncomment and run for p values, test stats
+results_poly_1_5 <- get_test_stat(n, m, k, poly_test_1_5)
+
+
+poly_test_6_5 <- get_parameters(df, x_6, test_set, m, n_z, n_mc, k, cp = .01)
+#saving parameters
+list.save(poly_test_6_5, 'data_and_results/poly_test_6_5.rdata')
+
+
+#uncomment and run for p values, test stats
+results_poly_6_5 <- get_test_stat(n, m, k, poly_test_6_5)
+
+
+
+
+```
+
+
+
+
+mentch and alexander have a different test stat... no solving of sigma..I think you should solve for sigma to get it to be chisq though. uhat is normal, then divide by sd to get standard normal, then square that to get chisq.
+```{r}
+poly_test_1 <- list.load('data_and_results/poly_test_1.rdata')
+results_poly_1 <- get_test_stat(n, m, k, poly_test_1)
+
+pchisq(results_poly_1$u_hat %*% solve(results_poly_1$SIGMA) %*% t(results_poly_1$u_hat), df = 41)
+
+pchisq(results_poly_1$u_hat %*% (results_poly_1$SIGMA) %*% t(results_poly_1$u_hat), df = 41)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

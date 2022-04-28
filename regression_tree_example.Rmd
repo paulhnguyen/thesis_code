@@ -1,0 +1,48 @@
+---
+title: "regression tree example"
+author: "Paul Nguyen"
+date: "4/19/2022"
+output: pdf_document
+---
+
+
+```{r}
+library(rpart)
+library(tidyverse)
+library(palmerpenguins)
+library(rpart.plot)
+library(here)
+```
+
+```{r}
+penguins <- penguins %>%
+  drop_na()
+
+flipper_tree <- rpart(flipper_length_mm ~ . -year, data = penguins,
+                      cp = .03)
+
+rpart.plot(flipper_tree,
+           main = "Tree to Find Flipper Length")
+
+
+flipper_tree_2 <- rpart(flipper_length_mm ~ bill_length_mm + bill_depth_mm, data = penguins,
+                      cp = .07)
+
+rpart.plot(flipper_tree_2,
+           main = "Tree to Find Flipper Length")
+prp(flipper_tree_2)
+
+
+ggplot() + 
+scale_x_continuous(name="bill depth") + 
+scale_y_continuous(name="bill length") +
+geom_rect( mapping=aes(xmin=13.1, xmax=16, ymin=32.1, ymax=59.6), color="black", alpha=0.5, fill = "lightblue") +
+geom_text(aes(x=13.1+(16-13.1)/2, y=32.1+(59.6-32.1)/2, label= "215"), size=4) +
+geom_rect( mapping=aes(xmin=16, xmax=21.5, ymin=32.1, ymax=49), color="black", alpha=0.5, fill = "wheat1") +
+geom_text(aes(x=16+(21.5-16)/2, y=32.1+(49-32.1)/2, label= "191"), size=4) +
+geom_rect( mapping=aes(xmin=16, xmax=21.5, ymin=49, ymax=59.6), color="black", alpha=0.5, fill = "lightsteelblue") +
+geom_text(aes(x=16+(21.5-16)/2, y=49+(59.6-49)/2, label= "204"), size=4)+
+labs(title="Predictor Space") + 
+  theme_minimal()
+```
+

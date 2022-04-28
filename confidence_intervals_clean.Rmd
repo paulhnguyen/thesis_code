@@ -1,0 +1,936 @@
+A Cleaner Version of Mentch Recreation - Tidy Document
+
+Loading Libraries, Functions, and Data
+```{r, message = FALSE, warning= FALSE}
+library(tidyverse)
+library(tree)
+library(ISLR)
+library(randomForest)
+library(rpart)
+library(cowplot)
+library(readr)
+library(here)
+
+ensemble_tree2 <- function(df, m, k, x_star, cp = .01){
+  
+  predictions <- data.frame(y_hat = rep(NA, m))
+  for (i in 1:m) {
+    subsample_index <- sample(1:nrow(df), k, replace = FALSE) 
+    subsample <- df[subsample_index,]
+    subsample.tree <- rpart(y ~ . , data = subsample,
+                            control = rpart.control(minsplit = 3,
+                                                    cp = cp)) 
+    prediction <- predict(subsample.tree, newdata = x_star)
+    predictions[i,1] <- prediction
+  }
+  y_hat_av <- mean(predictions$y_hat)
+  list1 <- list(predictions = predictions, y_hat_av = y_hat_av)
+  return(list1)
+
+}
+
+
+get_true_mean_simple <- function(n, m, k, x_star, cp = .01){
+  true_means <- rep(NA, 1000) 
+  for (i in 1:1000) {
+    x_1 <- runif(n, min = 0, max = 20)
+    e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+    y = 2*x_1 + e
+    df <- data.frame('y' = y,
+                     'x_1' = x_1)
+    
+    true_means[i] <- ensemble_tree2(df, m, k, 
+                                      x_star, cp = cp)[[2]]
+    if (i %% 10 == 0){
+      print(c(i, true_means[i]))
+    }
+  }
+  
+  true_mean <- mean(true_means)
+  return(true_mean)
+}
+
+get_true_mean_mars <- function(n, m, k, x_star, cp = .01){
+  true_means <- rep(NA, 1000) 
+  for (i in 1:1000) {
+    x_1 <- runif(n, min = 0, max = 1)
+    x_2 <- runif(n, min = 0, max = 1)
+    x_3 <- runif(n, min = 0, max = 1)
+    x_4 <- runif(n, min = 0, max = 1)
+    x_5 <- runif(n, min = 0, max = 1)
+    e <- rnorm(n, mean = 0, sd = sqrt(10))
+    y = 10*sin(pi*x_1*x_2) + 20*(x_3-.05)^2 + (10*x_4) + (5*x_5) + e
+    
+    df <- data.frame('y' = y,
+                     'x_1' = x_1,
+                     'x_2' = x_2,
+                     'x_3' = x_3,
+                     'x_4' = x_4,
+                     'x_5' = x_5)
+    
+    true_means[i] <- ensemble_tree2(df, m, k, 
+                                      x_star, cp = cp)[[2]]
+    if (i %% 10 == 0){
+      print(c(i, true_means[i]))
+    }
+  }
+  
+  true_mean <- mean(true_means)
+  return(true_mean)
+}
+
+
+rf_subbag_func <- function(df, m, k, x_star, mtry = 3, cp = .01){
+   
+  predictions_rf <- data.frame(y_hat = rep(NA, m))
+  for (i in 1:m) {
+  subsample_index <- sample(1:nrow(train), k, replace = FALSE) 
+  subsample <- train[subsample_index,]
+  subsample.rf <- randomForest(y ~ . , data = subsample,
+                               ntree = 1,
+                               mtry = mtry)
+  prediction <- predict(subsample.rf, newdata = x_star)
+  predictions_rf[i,1] <- prediction
+}
+  y_hat_av <- mean(predictions_rf$y_hat)
+  return(y_hat_av)
+
+}
+
+
+var_1_finder <- function(df, n_z, n_mc, k, x_star, cp = .01){
+  predictions <- rep(NA, n_mc)
+  pred_means <- rep(NA, n_z)
+  for (i in 1:n_z) {
+    index <- sample(1:nrow(df),1)
+    z_tilde <- df[index,] 
+    for (j in 1:n_mc) {
+      vec = 1:nrow(df)
+      vec = vec[-index]
+      subsample_index <- sample(vec, k-1, replace = FALSE) 
+      subsample <- df[subsample_index,]
+      subsample[k,] <- z_tilde 
+      subsample.tree <- rpart(y ~ . , data = subsample,
+                              control = rpart.control(minsplit = 3,
+                                                    cp = cp)) 
+      prediction <- predict(subsample.tree, newdata = x_star) 
+      predictions[j] <- prediction
+    }
+    pred_means[i] <- mean(predictions)
+  }
+  zeta_1_kn <- var(pred_means)
+  return(zeta_1_kn)
+  
+}
+
+var_k_finder <- function(df, n_z, k, x_star, cp = .01){
+  predictions <- rep(NA, n_z)
+  for (i in 1:n_z) {
+    subsample_index <- sample(1:nrow(df), k, replace = FALSE) 
+    subsample <- df[subsample_index,]
+    subsample.tree <- rpart(y ~ . , data = subsample,
+                              control = rpart.control(minsplit = 3,
+                                                    cp = cp)) 
+    prediction <- predict(subsample.tree, newdata = x_star) 
+    predictions[i] <- prediction
+  }
+  zeta_k_n_kn <- var(predictions)
+  return(zeta_k_n_kn)
+}
+
+
+#simulation functions
+simple_get_CI_sim <- function(reps, n, m, k, 
+                              n_z, n_mc, x_star, 
+                              csv_name, cp = .01){
+
+  CI_df <- data.frame(LB = rep(NA, reps), UB = rep(NA, reps))
+  alpha_hat <- n/m
+  for (i in 1:reps) {
+    print(i)
+    x_1 <- runif(n, min = 0, max = 20)
+    e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+    y = 2*x_1 + e
+    df <- data.frame('y' = y,
+                     'x_1' = x_1) 
+    
+    var_1 <- var_1_finder(df, n_z, n_mc, x_star, cp)
+    var_k <- var_k_finder(df, 500, x_star, cp)
+    
+    variance <- (((k^2)/alpha_hat)/m * var_1) + var_k/m
+    mean <- ensemble_tree2(df, m, k, x_star, cp)[[2]]
+    
+    LB <- qnorm(.025, mean , sd = sqrt(variance))
+    UB <- qnorm(.975, mean , sd = sqrt(variance))
+    CI_df[i, 1] <- LB
+    CI_df[i, 2] <- UB
+   
+    if ((i %% 50) == 0) {
+      print(c(i, csv_name))
+      write_csv(CI_df, csv_name)
+    }
+  }
+  return(CI_df) 
+}
+
+
+mars_get_CI_sim <- function(reps, n, m, k, n_z, n_mc, x_star, csv_name, cp = .01){
+  
+  CI_df <- data.frame(LB = rep(NA, reps), UB = rep(NA, reps))
+  alpha_hat <- n/m
+  for (i in 1:reps) {
+    print(i)
+    
+    x_1 <- runif(n, min = 0, max = 1)
+    x_2 <- runif(n, min = 0, max = 1)
+    x_3 <- runif(n, min = 0, max = 1)
+    x_4 <- runif(n, min = 0, max = 1)
+    x_5 <- runif(n, min = 0, max = 1)
+    e <- rnorm(n, mean = 0, sd = sqrt(10))
+    y = 10*sin(pi*x_1*x_2) + 20*(x_3-.05)^2 + (10*x_4) + (5*x_5) + e
+    
+    df <- data.frame('y' = y,
+                     'x_1' = x_1,
+                     'x_2' = x_2,
+                     'x_3' = x_3,
+                     'x_4' = x_4,
+                     'x_5' = x_5)
+    
+    var_1 <- var_1_finder(df, n_z, n_mc, x_star, cp)
+    var_k <- var_k_finder(df, 500, x_star, cp)
+    
+    variance <- (((k^2)/alpha_hat)/m * var_1) + var_k/m
+    mean <- ensemble_tree2(df, m, k, x_star, cp)[[2]]
+    
+    LB <- qnorm(.025, mean , sd = sqrt(variance))
+    UB <- qnorm(.975, mean , sd = sqrt(variance))
+    CI_df[i, 1] <- LB
+    CI_df[i, 2] <- UB
+   
+    if ((i %% 50) == 0) {
+      print(c(i, csv_name))
+      write_csv(CI_df, csv_name)
+    }
+  }
+  return(CI_df) 
+  
+}
+
+
+
+
+graph_CI <- function(CI_df){
+  CI_graph <- ggplot(data = CI_df,
+                     mapping = aes(x = X1, xend = X1, y = LB, yend = UB)) +
+      geom_segment() + 
+      geom_hline(yintercept = simple_small$true_mean, color = "tomato") + 
+      xlab("") +
+      ylab("Confidence Interval") + 
+      scale_x_continuous(breaks=c(0,250)) +
+      theme_minimal()
+  return(CI_graph)
+}
+
+
+```
+
+```{r}
+#loading previous data predictions
+
+#loading previous data CI
+#simple example
+#small n
+simple_small <- read_csv("data_and_results/simple_small.csv")
+#big n
+simple_big <- read_csv("data_and_results/simple_big.csv")
+#setting cp = 0
+simple_small_0 <- read_csv("data_and_results/simple_small_0.csv")
+simple_big_0 <- read_csv("data_and_results/simple_big_0.csv")
+
+#mars example
+#small n
+mars_small <- read_csv("data_and_results/mars_small.csv")
+#big n
+mars_big <- read_csv("data_and_results/mars_big.csv")
+#setting cp = 0
+mars_small_0 <- read_csv("data_and_results/mars_small_0.csv")
+mars_big_0 <- read_csv("data_and_results/mars_big_0.csv")
+
+```
+
+
+```{r making histograms of predictions}
+set.seed(2)
+n = 200
+m = 200
+k = 30
+x_star <- data.frame(x_1 = 10) #prediction at this point
+
+#adding limiting distributions for each graph.
+#small cp = .01
+
+
+
+simple_pred_small <- data.frame(pred = rep(NA, 250))
+for (i in 1:250) {
+  print(i)
+  x_1 <- runif(n, min = 0, max = 20)
+  e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+  y = 2*x_1 + e
+  df <- data.frame('y' = y,
+                     'x_1' = x_1)
+  
+  simple_pred_small$pred[i] <- ensemble_tree2(df, m, k, x_star, cp = .01)$y_hat_av
+}
+
+x_1 <- runif(n, min = 0, max = 20)
+e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+y = 2*x_1 + e
+df <- data.frame('y' = y,
+                   'x_1' = x_1)
+Sigma_1_SLR_small <- var_1_finder(df,
+                              n_z = 50,
+                              n_mc = 1000,
+                              k = k,
+                              x_star = x_star,
+                              cp = .01)
+Sigma_k_SLR_small <- var_k_finder(df,
+                              n_z = 5000,
+                              k = k,
+                              x_star = x_star,
+                              cp = .01)
+var_SLR_small <- (1/(n/m))*(k^2 / m) * Sigma_1_SLR_small + (1/m) * Sigma_k_SLR_small
+
+
+simple_pred_small$mean <- rep(mean(simple_pred_small$pred), length(simple_pred_small))
+simple_pred_small$var <- rep(var_SLR_small, length(simple_pred_small$pred))
+
+write_csv(simple_pred_small, here("data_and_results", "simple_pred_small.csv"))
+
+ggplot(data = simple_pred_small, mapping = aes(x = pred)) + 
+  geom_histogram(color = 'white')
+
+
+#bigger n, m
+n = 1000
+m = 1000
+k = 60
+
+set.seed(3)
+
+simple_pred_big <- data.frame(pred = rep(NA, 250))
+for (i in 1:250) {
+  print(i)
+  x_1 <- runif(n, min = 0, max = 20)
+  e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+  y = 2*x_1 + e
+  df <- data.frame('y' = y,
+                     'x_1' = x_1)
+  
+  simple_pred_big$pred[i] <- ensemble_tree2(df, m, k, x_star, cp = .01)$y_hat_av
+}
+
+x_1 <- runif(n, min = 0, max = 20)
+e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+y = 2*x_1 + e
+df <- data.frame('y' = y,
+                   'x_1' = x_1)
+Sigma_1_SLR_big <- var_1_finder(df,
+                              n_z = 50,
+                              n_mc = 1000,
+                              k = k,
+                              x_star = x_star,
+                              cp = .01)
+Sigma_k_SLR_big <- var_k_finder(df,
+                              n_z = 5000,
+                              k = k,
+                              x_star = x_star,
+                              cp = .01)
+var_SLR_big <- (1/(n/m))*(k^2 / m) * Sigma_1_SLR_big + (1/m) * Sigma_k_SLR_big
+simple_pred_big$mean <- rep(mean(simple_pred_big$pred), length(simple_pred_big))
+simple_pred_big$var <- rep(var_SLR_big, length(simple_pred_big$pred))
+write_csv(simple_pred_big, here("data_and_results", "simple_pred_big.csv"))
+
+#seems like this way overestimates the variance.. what if i try with cp = 0? 
+#small simple pred, cp = 0
+set.seed(2)
+n = 200
+m = 200
+k = 30
+x_star <- data.frame(x_1 = 10) #prediction at this point
+
+simple_pred_small_0 <- data.frame(pred = rep(NA, 250))
+for (i in 1:250) {
+  print(i)
+  x_1 <- runif(n, min = 0, max = 20)
+  e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+  y = 2*x_1 + e
+  df <- data.frame('y' = y,
+                     'x_1' = x_1)
+  
+  simple_pred_small_0$pred[i] <- ensemble_tree2(df, m, k,
+                                                x_star, cp = 0)$y_hat_av
+}
+
+x_1 <- runif(n, min = 0, max = 20)
+e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+y = 2*x_1 + e
+df <- data.frame('y' = y,
+                   'x_1' = x_1)
+Sigma_1_SLR_small_0 <- var_1_finder(df,
+                              n_z = 50,
+                              n_mc = 1000,
+                              k = k,
+                              x_star = x_star,
+                              cp = 0)
+Sigma_k_SLR_small_0 <- var_k_finder(df,
+                              n_z = 5000,
+                              k = k,
+                              x_star = x_star,
+                              cp = 0)
+var_SLR_small_0 <- (1/(n/m))*(k^2 / m) * Sigma_1_SLR_small_0 + (1/m) * Sigma_k_SLR_small_0
+
+
+simple_pred_small_0$mean <- rep(mean(simple_pred_small_0$pred), length(simple_pred_small_0))
+simple_pred_small_0$var <- rep(var_SLR_small_0, length(simple_pred_small_0$pred))
+
+write_csv(simple_pred_small_0, here("data_and_results", "simple_pred_small_0.csv"))
+
+#big simple pred, cp = 0
+#bigger n, m
+n = 1000
+m = 1000
+k = 60
+
+set.seed(3)
+
+simple_pred_big_0 <- data.frame(pred = rep(NA, 250))
+for (i in 1:250) {
+  print(i)
+  x_1 <- runif(n, min = 0, max = 20)
+  e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+  y = 2*x_1 + e
+  df <- data.frame('y' = y,
+                     'x_1' = x_1)
+  
+  simple_pred_big_0$pred[i] <- ensemble_tree2(df, m, k, 
+                                              x_star, cp = 0)$y_hat_av
+}
+
+x_1 <- runif(n, min = 0, max = 20)
+e <- rnorm(n, mean = 0, sd = sqrt(10)) 
+y = 2*x_1 + e
+df <- data.frame('y' = y,
+                   'x_1' = x_1)
+Sigma_1_SLR_big <- var_1_finder(df,
+                              n_z = 50,
+                              n_mc = 1000,
+                              k = k,
+                              x_star = x_star,
+                              cp = 0)
+Sigma_k_SLR_big <- var_k_finder(df,
+                              n_z = 5000,
+                              k = k,
+                              x_star = x_star,
+                              cp = .01)
+var_SLR_big <- (1/(n/m))*(k^2 / m) * Sigma_1_SLR_big + (1/m) * Sigma_k_SLR_big
+simple_pred_big_0$mean <- rep(mean(simple_pred_big_0$pred), length(simple_pred_big_0))
+simple_pred_big_0$var <- rep(var_SLR_big, length(simple_pred_big_0$pred))
+write_csv(simple_pred_big_0, here("data_and_results", "simple_pred_big_0.csv"))
+
+```
+
+
+```{r mars predictions}
+
+#MARS time
+set.seed(2)
+x_star <- data.frame(x_1 = .5, x_2 = .5, x_3 = .5,
+                     x_4 = .5, x_5 = .5) #prediction at this point
+
+n = 500
+m = 500
+k = 75
+
+mars_pred_small <- data.frame(pred = rep(NA, 250))
+for (i in 1:250) {
+  x_1 <- runif(n, min = 0, max = 1)
+  x_2 <- runif(n, min = 0, max = 1)
+  x_3 <- runif(n, min = 0, max = 1)
+  x_4 <- runif(n, min = 0, max = 1)
+  x_5 <- runif(n, min = 0, max = 1)
+  e <- rnorm(n, mean = 0, sd = sqrt(10))
+  y = 10*sin(pi*x_1*x_2) + 20*(x_3-.05)^2 + (10*x_4) + (5*x_5) + e
+    
+  df <- data.frame('y' = y,
+                   'x_1' = x_1,
+                   'x_2' = x_2,
+                   'x_3' = x_3,
+                   'x_4' = x_4,
+                   'x_5' = x_5)
+  
+  mars_pred_small$pred[i] <- ensemble_tree2(df, m, k, x_star, cp = .01)$y_hat_av
+}
+
+
+x_1 <- runif(n, min = 0, max = 1)
+x_2 <- runif(n, min = 0, max = 1)
+x_3 <- runif(n, min = 0, max = 1)
+x_4 <- runif(n, min = 0, max = 1)
+x_5 <- runif(n, min = 0, max = 1)
+e <- rnorm(n, mean = 0, sd = sqrt(10))
+y = 10*sin(pi*x_1*x_2) + 20*(x_3-.05)^2 + (10*x_4) + (5*x_5) + e
+  
+df <- data.frame('y' = y,
+                 'x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5)
+
+Sigma_1_MARS_small <- var_1_finder(df,
+                              n_z = 250,
+                              n_mc = 1000,
+                              k = 75,
+                              x_star = x_star,
+                              cp = .01)
+Sigma_k_MARS_small <- var_k_finder(df,
+                              n_z = 5000,
+                              k = 75,
+                              x_star = x_star,
+                              cp = .01)
+var_MARS_small <- (1/(n/m))*(k^2 / m) * Sigma_1_MARS_small + (1/m) * Sigma_k_MARS_small
+mars_pred_small$mean <- rep(mean(mars_pred_small$pred), length(mars_pred_small))
+mars_pred_small$var <- rep(var_MARS_small, length(mars_pred_small$pred))
+
+write_csv(mars_pred_small, here("data_and_results", "mars_pred_small.csv"))
+
+
+n = 1000
+m = 1000
+k = 75
+set.seed(3)
+mars_pred_big <- data.frame(pred = rep(NA, 250))
+for (i in 1:250) {
+  x_1 <- runif(n, min = 0, max = 1)
+  x_2 <- runif(n, min = 0, max = 1)
+  x_3 <- runif(n, min = 0, max = 1)
+  x_4 <- runif(n, min = 0, max = 1)
+  x_5 <- runif(n, min = 0, max = 1)
+  e <- rnorm(n, mean = 0, sd = sqrt(10))
+  y = 10*sin(pi*x_1*x_2) + 20*(x_3-.05)^2 + (10*x_4) + (5*x_5) + e
+    
+  df <- data.frame('y' = y,
+                   'x_1' = x_1,
+                   'x_2' = x_2,
+                   'x_3' = x_3,
+                   'x_4' = x_4,
+                   'x_5' = x_5)
+  
+  mars_pred_big$pred[i] <- ensemble_tree2(df, m, k, x_star, cp = .01)$y_hat_av
+}
+    
+
+
+x_1 <- runif(n, min = 0, max = 1)
+x_2 <- runif(n, min = 0, max = 1)
+x_3 <- runif(n, min = 0, max = 1)
+x_4 <- runif(n, min = 0, max = 1)
+x_5 <- runif(n, min = 0, max = 1)
+e <- rnorm(n, mean = 0, sd = sqrt(10))
+y = 10*sin(pi*x_1*x_2) + 20*(x_3-.05)^2 + (10*x_4) + (5*x_5) + e
+  
+df <- data.frame('y' = y,
+                 'x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5)
+
+Sigma_1_MARS_big <- var_1_finder(df,
+                              n_z = 250,
+                              n_mc = 1000,
+                              k = 75,
+                              x_star = x_star,
+                              cp = .01)
+Sigma_k_MARS_big <- var_k_finder(df,
+                              n_z = 5000,
+                              k = 75,
+                              x_star = x_star,
+                              cp = .01)
+var_MARS_big <- (1/(n/m))*(k^2 / m) * Sigma_1_MARS_big + (1/m) * Sigma_k_MARS_big
+mars_pred_big$mean <- rep(mean(mars_pred_big$pred), length(mars_pred_big))
+mars_pred_big$var <- rep(var_MARS_big, length(mars_pred_big$pred))
+
+write_csv(mars_pred_big, here("data_and_results", "mars_pred_big.csv"))
+
+
+
+#now trying with mars cp = 0 
+set.seed(2)
+x_star <- data.frame(x_1 = .5, x_2 = .5, x_3 = .5,
+                     x_4 = .5, x_5 = .5) #prediction at this point
+
+n = 500
+m = 500
+k = 75
+
+mars_pred_small_0 <- data.frame(pred = rep(NA, 250))
+for (i in 1:250) {
+  x_1 <- runif(n, min = 0, max = 1)
+  x_2 <- runif(n, min = 0, max = 1)
+  x_3 <- runif(n, min = 0, max = 1)
+  x_4 <- runif(n, min = 0, max = 1)
+  x_5 <- runif(n, min = 0, max = 1)
+  e <- rnorm(n, mean = 0, sd = sqrt(10))
+  y = 10*sin(pi*x_1*x_2) + 20*(x_3-.05)^2 + (10*x_4) + (5*x_5) + e
+    
+  df <- data.frame('y' = y,
+                   'x_1' = x_1,
+                   'x_2' = x_2,
+                   'x_3' = x_3,
+                   'x_4' = x_4,
+                   'x_5' = x_5)
+  
+  mars_pred_small_0$pred[i] <- ensemble_tree2(df, m, k,
+                                              x_star, cp = 0)$y_hat_av
+}
+
+
+x_1 <- runif(n, min = 0, max = 1)
+x_2 <- runif(n, min = 0, max = 1)
+x_3 <- runif(n, min = 0, max = 1)
+x_4 <- runif(n, min = 0, max = 1)
+x_5 <- runif(n, min = 0, max = 1)
+e <- rnorm(n, mean = 0, sd = sqrt(10))
+y = 10*sin(pi*x_1*x_2) + 20*(x_3-.05)^2 + (10*x_4) + (5*x_5) + e
+  
+df <- data.frame('y' = y,
+                 'x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5)
+
+Sigma_1_MARS_small_0 <- var_1_finder(df,
+                              n_z = 250,
+                              n_mc = 1000,
+                              k = 75,
+                              x_star = x_star,
+                              cp = 0)
+Sigma_k_MARS_small_0 <- var_k_finder(df,
+                              n_z = 5000,
+                              k = 75,
+                              x_star = x_star,
+                              cp = 0)
+var_MARS_small_0 <- (1/(n/m))*(k^2 / m) * Sigma_1_MARS_small_0 + (1/m) * Sigma_k_MARS_small_0
+mars_pred_small_0$mean <- rep(mean(mars_pred_small_0$pred), length(mars_pred_small_0))
+mars_pred_small_0$var <- rep(var_MARS_small_0, length(mars_pred_small_0$pred))
+
+write_csv(mars_pred_small_0, here("data_and_results", "mars_pred_small_0.csv"))
+
+
+n = 1000
+m = 1000
+k = 75
+set.seed(3)
+
+
+mars_pred_big_0 <- data.frame(pred = rep(NA, 250))
+for (i in 1:250) {
+  x_1 <- runif(n, min = 0, max = 1)
+  x_2 <- runif(n, min = 0, max = 1)
+  x_3 <- runif(n, min = 0, max = 1)
+  x_4 <- runif(n, min = 0, max = 1)
+  x_5 <- runif(n, min = 0, max = 1)
+  e <- rnorm(n, mean = 0, sd = sqrt(10))
+  y = 10*sin(pi*x_1*x_2) + 20*(x_3-.05)^2 + (10*x_4) + (5*x_5) + e
+    
+  df <- data.frame('y' = y,
+                   'x_1' = x_1,
+                   'x_2' = x_2,
+                   'x_3' = x_3,
+                   'x_4' = x_4,
+                   'x_5' = x_5)
+  
+  mars_pred_big_0$pred[i] <- ensemble_tree2(df, m, k,
+                                              x_star, cp = 0)$y_hat_av
+}
+
+
+x_1 <- runif(n, min = 0, max = 1)
+x_2 <- runif(n, min = 0, max = 1)
+x_3 <- runif(n, min = 0, max = 1)
+x_4 <- runif(n, min = 0, max = 1)
+x_5 <- runif(n, min = 0, max = 1)
+e <- rnorm(n, mean = 0, sd = sqrt(10))
+y = 10*sin(pi*x_1*x_2) + 20*(x_3-.05)^2 + (10*x_4) + (5*x_5) + e
+  
+df <- data.frame('y' = y,
+                 'x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3,
+                 'x_4' = x_4,
+                 'x_5' = x_5)
+
+Sigma_1_MARS_big_0 <- var_1_finder(df,
+                              n_z = 250,
+                              n_mc = 1000,
+                              k = 75,
+                              x_star = x_star,
+                              cp = 0)
+Sigma_k_MARS_big_0 <- var_k_finder(df,
+                              n_z = 5000,
+                              k = 75,
+                              x_star = x_star,
+                              cp = 0)
+var_MARS_big_0 <- (1/(n/m))*(k^2 / m) * Sigma_1_MARS_big_0 + (1/m) * Sigma_k_MARS_big_0
+mars_pred_big_0$mean <- rep(mean(mars_pred_big_0$pred), length(mars_pred_big_0))
+mars_pred_big_0$var <- rep(var_MARS_big_0, length(mars_pred_big_0$pred))
+
+write_csv(mars_pred_big_0, here("data_and_results", "mars_pred_big_0.csv"))
+
+```
+
+
+
+```{r graphing simple results}
+
+# graphing CI function
+ggplot(data = simple_small,
+       mapping = aes(x = X1, xend = X1, y = LB, yend = UB)) +
+  geom_segment() + 
+  geom_hline(yintercept = simple_small$true_mean, color = "tomato") + 
+  labs(title = "Confidence Intervals for SLR, \n n=200, m=200, k=30") +
+  xlab("") +
+  ylab("Confidence Interval") + 
+  scale_x_continuous(breaks=c(0,250)) +
+  theme_minimal()
+
+simple_small_graph <- graph_CI(simple_small) +
+  labs(title = "Confidence Intervals for SLR; \nn=200, m=200, k=30")
+simple_small_0_graph <- graph_CI(simple_small_0) +
+  labs(title = "Confidence Intervals for SLR; \ncp = 0, n=200, m=200, k=30")
+
+simple_big_graph <- graph_CI(simple_big) +
+  labs(title = "Confidence Intervals for SLR; \nn=1000, m=1000, k=60")
+simple_big_0_graph <- graph_CI(simple_big_0) +
+  labs(title = "Confidence Intervals for SLR; \ncp = 0, n=1000, m=1000, k=60")
+
+
+
+
+```
+
+
+```{r simple investigations}
+sum((simple_small$LB < simple_small$true_mean) & (simple_small$true_mean< simple_small$UB)) 
+#92% of confidence intervals contained true mean.. not bad
+sum((simple_small_0$LB < simple_small_0$true_mean) & (simple_small_0$true_mean< simple_small_0$UB)) 
+#92% of confidence intervals contained true mean.. same as simple_small
+sum((simple_big$LB < simple_big$true_mean) & (simple_big$true_mean< simple_big$UB)) 
+#95% of confidence intervals contained true mean.. pretty good!
+sum((simple_big_0$LB < simple_big_0$true_mean) & (simple_big_0$true_mean< simple_big_0$UB)) 
+#91% of confidence intervals contained true mean.. not bad, but not as good as simple_big
+
+
+sum((mars_small$LB < mars_small$true_mean) & (mars_small$true_mean< mars_small$UB)) 
+#92% of confidence intervals contained true mean.. not bad
+sum((mars_small_0$LB < mars_small_0$true_mean) & (mars_small_0$true_mean< mars_small_0$UB)) 
+#92% of confidence intervals contained true mean.. same as mars_small
+sum((mars_big$LB < mars_big$true_mean) & (mars_big$true_mean< mars_big$UB)) 
+#95% of confidence intervals contained true mean.. pretty good!
+sum((mars_big_0$LB < mars_big_0$true_mean) & (mars_big_0$true_mean< mars_big_0$UB)) 
+#91% of confidence intervals contained true mean.. not bad, but not as good as simple_big
+
+
+
+```
+
+
+
+
+
+```{r simple set}
+#default cp
+set.seed(2)
+n = 200
+m = 200
+k = 30
+reps = 250
+n_z = 50
+n_mc = 250
+x_star <- data.frame(x_1 = 10) #prediction at this point
+
+
+#finding estimate for true prediction at x_star
+true_mean_ss = rep(get_true_mean(n, m, k, x_star, cp = .01),
+                reps)
+
+simple_small <- simple_get_CI_sim(reps, n, m, k, n_z, n_mc, x_star,
+                                "data_and_results/simple_small.csv")
+#making new col of simple small to show true mean
+simple_small[,3] <- true_mean_ss
+colnames(simple_small)[3] <- "true_mean"
+write.csv(simple_small, "data_and_results/simple_small.csv")
+
+
+
+#now, looking at when cp = 0
+simple_small_0 <- simple_get_CI_sim(reps, n, m, k, n_z, n_mc, x_star,
+                                "data_and_results/simple_small_0.csv", cp = 0)
+#making new col of true mean
+true_mean_ss0 = rep(get_true_mean(n, m, k, x_star, cp = 0),
+                    reps)
+simple_small_0[,3] <- true_mean_ss0
+colnames(simple_small_0)[3] <- "true_mean"
+write.csv(simple_small_0, "data_and_results/simple_small_0.csv")
+
+
+#changing cp = 0 does decrease the accuracy of our confidence intervals
+
+#bigger n, m
+n = 1000
+m = 1000
+k = 60
+set.seed(3)
+
+simple_big <- simple_get_CI_sim(reps, n, m, k, n_z, n_mc, x_star,
+                                "data_and_results/simple_big.csv")
+true_mean_sb = rep(get_true_mean(n, m, k, x_star, cp = .01),
+                reps)
+simple_big[,3] <- true_mean_sb
+colnames(simple_big)[3] <- "true_mean"
+write.csv(simple_big, "data_and_results/simple_big.csv")
+
+
+simple_big_0 <- simple_get_CI_sim(reps, n, m, k, n_z, n_mc, x_star,
+                                "data_and_results/simple_big_0.csv", cp = 0)
+true_mean_sb0 = rep(get_true_mean(n, m, k, x_star, cp = .01),
+                reps)
+simple_big_0[,3] <- true_mean_sb0 
+colnames(simple_big_0)[3] <- "true_mean"
+write.csv(simple_big_0, "data_and_results/simple_big_0.csv")
+
+```
+
+
+```{r mars set}
+#default cp
+set.seed(2)
+n = 500
+m = 500
+k = 50
+reps = 250
+n_z = 50
+n_mc = 250
+x_star <- data.frame(x_1 = .5,
+                     x_2 = .5,
+                     x_3 = .5,
+                     x_4 = .5,
+                     x_5 = .5) #prediction at this point
+
+
+#finding estimate for true prediction at x_star
+true_mean_ms = rep(get_true_mean_mars(n, m, k, x_star, cp = .01),
+                reps)
+
+mars_small <- mars_get_CI_sim(reps, n, m, k, n_z, n_mc, x_star,
+                              "data_and_results/mars_small.csv",
+                              cp = .01)
+#making new col of simple small to show true mean
+mars_small[,4] <- true_mean_ms
+colnames(mars_small)[4] <- "true_mean"
+write.csv(mars_small, "data_and_results/mars_small.csv")
+
+
+#now with cp = 0
+#finding estimate for true prediction at x_star
+true_mean_ms_0 = rep(get_true_mean_mars(n, m, k, x_star, cp = 0),
+                reps)
+
+mars_small_0 <- mars_get_CI_sim(reps, n, m, k, n_z, n_mc, x_star,
+                                "data_and_results/mars_small_0.csv",
+                                cp = 0)
+#making new col of simple small to show true mean
+mars_small_0[,4] <- true_mean_ms_0
+colnames(mars_small_0)[4] <- "true_mean"
+write.csv(mars_small_0, "data_and_results/mars_small_0.csv")
+
+
+#now repeat, but big
+n = 1000
+m = 1000
+k = 75
+set.seed(3)
+
+#finding estimate for true prediction at x_star
+true_mean_mb = rep(get_true_mean_mars(n, m, k, x_star, cp = .01),
+                reps)
+
+mars_big <- mars_get_CI_sim(reps, n, m, k, n_z, n_mc, x_star,
+                              "data_and_results/mars_big.csv",
+                              cp = .01)
+#making new col of simple small to show true mean
+mars_big[,4] <- true_mean_mb
+colnames(mars_big)[4] <- "true_mean"
+write.csv(mars_big, "data_and_results/mars_big.csv")
+
+
+#now with cp = 0
+#finding estimate for true prediction at x_star
+true_mean_mb_0 = rep(get_true_mean_mars(n, m, k, x_star, cp = 0),
+                reps)
+
+mars_big_0 <- mars_get_CI_sim(reps, n, m, k, n_z, n_mc, x_star,
+                                "data_and_results/mars_big_0.csv",
+                                cp = 0)
+#making new col of simple small to show true mean
+mars_big_0[,4] <- true_mean_mb_0
+colnames(mars_big_0)[4] <- "true_mean"
+write.csv(mars_big_0, "data_and_results/mars_big_0.csv")
+
+
+```
+
+```{r}
+mars_small <- mars_small[,2:4]
+write.csv(mars_small, "data_and_results/mars_small.csv")
+
+mars_small_0 <- mars_small_0[,2:4]
+write.csv(mars_small_0, "data_and_results/mars_small_0.csv")
+
+mars_big <- mars_big[,2:4]
+write.csv(mars_big, "data_and_results/mars_big.csv")
+
+mars_big_0 <- mars_big_0[,c(2:4)]
+write.csv(mars_big_0, "data_and_results/mars_big_0.csv")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,352 @@
+---
+title: "Algorithms"
+author: "Paul Nguyen"
+date: "11/7/2021"
+output: pdf_document
+---
+```{r loading libraries}
+#loading libraries
+library(tidyverse)
+
+library(tidymodels)
+library(tree)
+library(ISLR)
+library(randomForest)
+```
+
+```{r creating data}
+#creating data
+set.seed(2)
+n = 10000
+x_1 <- data.frame(runif(n))
+x_2 <- data.frame(runif(n))
+x_3 <- data.frame(rnorm(n, mean = 1))
+
+b_0 <- 5
+b_1 <- 2
+b_2 <- 0
+b_3 <- .1
+
+sigma <- 2
+
+eps <- rnorm(n, mean = 0, sd = sigma)
+
+
+y <- data.frame(b_0 + (b_1*x_1) + (b_2*x_2) + (b_3 * x_3) + eps)
+
+df <- data.frame('y' = y,
+                 'x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3) 
+colnames(df) = c('y', 'x_1', 'x_2', 'x_3')
+
+
+smp_size <- floor(0.75 * nrow(df))
+
+## set the seed to make your partition reproducible
+set.seed(2)
+train_ind <- sample(seq_len(nrow(df)), size = smp_size)
+
+train <- df[train_ind, ]
+test <- df[-train_ind, ]
+
+
+lm(y ~., data = train)
+
+```
+
+```{r single subbagged tree}
+#looking at subbagging (single subbagged tree)
+x_star <- data.frame(x_1 = .5, x_2 = .5, x_3 = .5)
+k = floor(sqrt(nrow(train))) #size of subsample of training set
+subsample_index <- sample(1:nrow(train), k, replace = FALSE) #no replacement, index of subsample in training set
+
+subsample <- train[subsample_index,]
+subsample.tree <- tree(y ~ . , data = subsample)
+summary(subsample.tree)
+
+plot(subsample.tree)
+text(subsample.tree)
+
+prediction <- predict(subsample.tree, newdata = x_star)
+
+```
+
+
+```{r multiple subbagged trees}
+#looking at subbagging (multiple subbagged tree)
+set.seed(2)
+m = nrow(train) / 10 #number of subbagged trees
+x_star <- data.frame(x_1 = .5, x_2 = .5, x_3 = .5)
+predictions = data.frame(y_hat = rep(NA, m))
+k = floor(sqrt(nrow(train))) #size of subsample of training set
+
+for (i in 1:m) {
+  subsample_index <- sample(1:nrow(train), k, replace = FALSE) #no replacement, index of subsample in training set
+  subsample <- train[subsample_index,]
+  subsample.tree <- tree(y ~ . , data = subsample)
+  prediction <- predict(subsample.tree, newdata = x_star)
+  predictions[i,1] <- prediction
+  
+}
+ 
+
+ggplot(data = predictions, mapping = aes(x = y_hat)) +
+  geom_density() 
+#not necessarily normal, dip where y 'should be'
+
+
+y_hat_av <- mean(predictions[,1])
+y_hat_av
+
+b_0 + (b_1*.5) + (b_2*.5) + (b_3 * .5)
+
+```
+
+since peculiar dip in where mean should have been, going to try again with larger n, different seed
+
+```{r creating data larger n}
+#creating data
+set.seed(4)
+n = 100000
+x_1 <- data.frame(runif(n))
+x_2 <- data.frame(runif(n))
+x_3 <- data.frame(rnorm(n, mean = 1))
+
+b_0 <- 5
+b_1 <- 2
+b_2 <- 0
+b_3 <- .1
+
+sigma <- 2
+
+eps <- rnorm(n, mean = 0, sd = sigma)
+
+
+y <- data.frame(b_0 + (b_1*x_1) + (b_2*x_2) + (b_3 * x_3) + eps)
+
+df <- data.frame('y' = y,
+                 'x_1' = x_1,
+                 'x_2' = x_2,
+                 'x_3' = x_3) 
+colnames(df) = c('y', 'x_1', 'x_2', 'x_3')
+
+
+smp_size <- floor(0.75 * nrow(df))
+
+## set the seed to make your partition reproducible
+set.seed(2)
+train_ind <- sample(seq_len(nrow(df)), size = smp_size)
+
+train <- df[train_ind, ]
+test <- df[-train_ind, ]
+
+
+lm(y ~., data = train)
+
+```
+
+```{r larger n single subbagged tree}
+#looking at subbagging (single subbagged tree)
+x_star <- data.frame(x_1 = .5, x_2 = .5, x_3 = .5)
+k = floor(sqrt(nrow(train))) #size of subsample of training set
+subsample_index <- sample(1:nrow(train), k, replace = FALSE) #no replacement, index of subsample in training set
+
+subsample <- train[subsample_index,]
+subsample.tree <- tree(y ~ . , data = subsample)
+summary(subsample.tree)
+
+plot(subsample.tree)
+text(subsample.tree)
+
+prediction <- predict(subsample.tree, newdata = x_star)
+
+```
+
+
+```{r larger n multiple subbagged tree}
+#looking at subbagging (multiple subbagged tree)
+set.seed(4)
+m = nrow(train) /  #number of subbagged trees
+x_star <- data.frame(x_1 = .5, x_2 = .5, x_3 = .5)
+predictions = data.frame(y_hat = rep(NA, m))
+k = floor(sqrt(nrow(train))) #size of subsample of training set
+
+for (i in 1:m) {
+  subsample_index <- sample(1:nrow(train), k, replace = FALSE) #no replacement, index of subsample in training set
+  subsample <- train[subsample_index,]
+  subsample.tree <- tree(y ~ . , data = subsample)
+  prediction <- predict(subsample.tree, newdata = x_star)
+  predictions[i,1] <- prediction
+  
+}
+ 
+
+ggplot(data = predictions, mapping = aes(x = y_hat)) +
+  geom_density() 
+#not necessarily normal, dip where y 'should be'
+
+
+y_hat_av <- mean(predictions[,1])
+y_hat_av
+
+b_0 + (b_1*.5) + (b_2*.5) + (b_3 * .5)
+
+```
+
+looks way better with the larger n!
+
+```{r single subbagged random tree}
+#use the random forest package with ntrees = 1 for each subsample and then average.. so essentially use the rf package for each tree
+#single subbagged random tree
+set.seed(2)
+x_star <- data.frame(x_1 = .5, x_2 = .5, x_3 = .5)
+
+k = floor(sqrt(nrow(train))) #size of subsample of training set
+subsample_index <- sample(1:nrow(train), k, replace = FALSE) #no replacement, index of subsample in training set
+
+subsample <- train[subsample_index,]
+subsample.rf <- randomForest(y ~ . , data = subsample,
+                             ntree = 1,
+                             mtry = 1)
+subsample.rf
+
+
+```
+
+```{r subbagged random forest}
+#subbagged random forest, multiple trees
+set.seed(2)
+m = nrow(train) / 100 #number of subbagged trees
+x_star <- data.frame(x_1 = .5, x_2 = .5, x_3 = .5)
+predictions_rf = data.frame(y_hat = rep(NA, m))
+k = floor(sqrt(nrow(train))) #size of subsample 
+
+for (i in 1:m) {
+  subsample_index <- sample(1:nrow(train), k, replace = FALSE) #no replacement, index of subsample in training set
+  subsample <- train[subsample_index,]
+  subsample.rf <- randomForest(y ~ . , data = subsample,
+                               ntree = 1,
+                               mtry = 1)
+  prediction <- predict(subsample.rf, newdata = x_star)
+  predictions_rf[i,1] <- prediction
+  
+}
+ 
+
+ggplot(data = predictions_rf, mapping = aes(x = y_hat)) +
+  geom_density() 
+#no dip as seen before, looks more normal
+
+
+y_hat_av <- mean(predictions_rf[,1])
+y_hat_av
+
+b_0 + (b_1*.5) + (b_2*.5) + (b_3 * .5)
+```
+
+## Variance Estimation
+
+```{r zeta 1 kn estimation (1 shared observation)}
+set.seed(2)
+#same k as above, size of subsample
+k = floor(sqrt(nrow(train)))
+#same prediction vector
+x_star <- data.frame(x_1 = .5, x_2 = .5, x_3 = .5)
+#first, select c fixed points
+c <- 1
+#select n_mc, number of subsamples drawn, at least 500
+n_mc <- 500
+#select n_z, number of initial sets of fixed points... not sure how to choose this value? want as large as possible
+n_z <- 100
+
+predictions <- rep(NA, n_mc)
+pred_means <- rep(NA, n_z)
+
+for (i in 1:n_z) {
+  index <- sample(1:nrow(train),1)
+  z_tilde <- train[index,]
+  for (j in 1:n_mc) {
+    vec = 1:nrow(train)
+    vec = vec[-index]
+    subsample_index <- sample(vec, k-1, replace = FALSE) #subsample size k-1, not including index
+    subsample <- train[subsample_index,]
+    subsample[k,] <- z_tilde #manually including z_tilde
+    subsample.rf <- randomForest(y ~ . , data = subsample,
+                               ntree = 1,
+                               mtry = 1)
+    prediction <- predict(subsample.rf, newdata = x_star)
+    predictions[j] <- prediction
+  }
+  pred_means[i] <- mean(predictions)
+}
+
+
+#now, take variance of pred_means
+zeta_1_kn <- var(pred_means)
+zeta_1_kn
+```
+
+
+
+```{r zeta kn kn estimation (total subsample shared)}
+set.seed(2)
+#same k as above, size of subsample
+k = floor(sqrt(nrow(train)))
+#same prediction vector
+x_star <- data.frame(x_1 = .5, x_2 = .5, x_3 = .5)
+
+#select n_mc, number of subsamples drawn, at least 500
+n_mc <- 500
+#select n_z, number of initial sets of fixed points... not sure how to choose this value?
+n_z <- 100
+
+predictions <- rep(NA, n_z)
+
+
+for (i in 1:n_z) {
+  subsample_index <- sample(1:nrow(train), k, replace = FALSE) 
+  subsample <- train[subsample_index,]
+  subsample.rf <- randomForest(y ~ . , data = subsample,
+                               ntree = 1,
+                               mtry = 1)
+  prediction <- predict(subsample.rf, newdata = x_star)
+  predictions[i] <- prediction
+}
+
+
+#now, take variance of n_z predictions
+zeta_k_n_kn <- var(predictions)
+zeta_k_n_kn
+```
+
+
+```{r Computing Confidence Intervals}
+#using random forest mean/variance
+theta_hat <- y_hat_av
+alpha <- nrow(train) / m
+
+variance <- (((k^2) / alpha)*zeta_1_kn) + zeta_k_n_kn
+
+LB <- qnorm(.025, mean = theta_hat, sd = sqrt(variance))
+UB <- qnorm(.975, mean = theta_hat, sd = sqrt(variance))
+CI <- c(LB, UB)
+CI
+
+#ok, so the confidence interval doesnt look great, variance seems way too big, think I need to increase alpha for sure.. seems interesting that k_n (size of subsample) increases the variance actually
+
+#tried with smaller m, which increase alpha, but doesnt really help that much. still a very large confidence interval. going to try to use same data as paper
+
+#trying to save environment
+# save.image(file='Mentch_Hooker_alg.RData')
+# load('myEnvironment.RData')
+```
+
+
+
+```{r Tests of Significance}
+#TO DO
+```
+
+
+
